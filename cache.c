@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <pthread.h>
+#include <syscall.h>
 
 /* A simple cache */
 int NUM_BUCKETS = 100;
@@ -16,11 +18,15 @@ typedef struct node {
 
 typedef struct fields {
 	int isGet;
-	char * key;
-	char * val;	
+	char key[256];
+	char val[256];	
 } FIELDS;
 
 NODE* MAP[100];
+char buffer[256];
+
+pthread_mutex_t bufferLock;
+pthread_mutex_t cacheLock;
 
 long currentTime = 0;// TEMP
 
@@ -38,8 +44,10 @@ void freeFields(FIELDS * f) {
 
 NODE * makeNode(char * key, char * val, long expiry, int needsRevalidation) {
 	NODE * newNode = (NODE *)malloc(sizeof(NODE));
-	newNode->key = key;
-	newNode->val = val;
+	newNode->key = (char *)malloc((strlen(key) + 1) * sizeof(char));
+	strcpy(newNode->key, key);
+	newNode->val = (char *)malloc((strlen(val) + 1) * sizeof(char));
+	strcpy(newNode->val, val);
 	newNode->expiry = expiry;
 	newNode->needsRevalidation = needsRevalidation;
 	newNode->next = NULL;
@@ -47,6 +55,7 @@ NODE * makeNode(char * key, char * val, long expiry, int needsRevalidation) {
 }
 
 void updateNode(NODE * node, char * value, long expiry, int needsRevalidation) {
+	free(node->val);
 	node->val = value;
 	node->expiry = expiry;
 	node->needsRevalidation = needsRevalidation;
@@ -67,23 +76,34 @@ NODE * getNode(int bucket, char * key) {
 
 
 char * getValue(int bucket, char * key) {
+	pthread_mutex_lock(&cacheLock);
 	NODE * foundNode = getNode(bucket, key);
+	char * result;
 	if (foundNode == NULL) {
 		printf("ID %s not in cache\n", key);
-		return NULL;	
+		//return NULL;
+		result = NULL;	
 	}
-	if (foundNode->expiry < currentTime) {
+	else if (foundNode->expiry < currentTime) {
 		printf("ID %s found but expired\n", key);
-		return NULL;
+		//return NULL;
+		result = NULL;
 	}
-	if (foundNode->needsRevalidation) {
+	else if (foundNode->needsRevalidation) {
 		printf("ID %s found but needs revalidation\n", key);
-		return NULL;
+		//return NULL;
+		result = NULL;
 	}
-	return foundNode->val;
+	else {
+		result = foundNode->val;
+	}
+	pthread_mutex_unlock(&cacheLock);
+	return result;
+	//return foundNode->val;
 }
 
 void putKey(int bucket, char * key, char * value, long expiry, int needsRevalidation) {
+	pthread_mutex_lock(&cacheLock);
 	NODE * targetNode = getNode(bucket, key);
 	if (targetNode == NULL) {
 		targetNode = makeNode(key, value, expiry, needsRevalidation);
@@ -95,6 +115,7 @@ void putKey(int bucket, char * key, char * value, long expiry, int needsRevalida
 		updateNode(targetNode, value, expiry, needsRevalidation);
 		printf("Updated value as %s, expiry as %lu and revalidation status as %d of key %s in cache\n", value, expiry, needsRevalidation, key);
 	}	
+	pthread_mutex_unlock(&cacheLock);
 }
 
 int indexOf(char * key) { // Simple but weak hash function
@@ -145,7 +166,6 @@ void parseSentence(FIELDS * f, char * sentence) {
 		exit(1);
 	}
 	printf("Key : %s\n", getStatus);
-	f->key = (char *)malloc((strlen(getStatus) + 1) * sizeof(char));
 	strcpy(f->key, getStatus);
 	if (!f->isGet) {
 		getStatus = strtok(NULL, DELIM);
@@ -154,31 +174,50 @@ void parseSentence(FIELDS * f, char * sentence) {
 			exit(1);
 		}
 		printf("Value : %s\n", getStatus);
-		f->val = (char *)malloc((strlen(getStatus) + 1) * sizeof(char));
 		strcpy(f->val, getStatus);
-		//*(f->val + strlen(getStatus)) = '\0';
 	}
 	return;	
 } 
 
 
-int main() {
-	char sentence[256];
-	char * key;
-	char * value;
-	char * result;
-	FIELDS * f = (FIELDS *)malloc(sizeof(FIELDS));
-	while (fgets(sentence, 256, stdin) != NULL) {
-		*(sentence + strlen(sentence) - 1) = '\0';
-		parseSentence(f, sentence);
-		if (f->isGet) {
-			result = get(f->key);
-			printf("Value of key %s : %s\n", f->key, result);
-		}
-		else {
-			put(f->key, f->val, 100, 0);
-		}
-	}
-	printf("Value of key %s is %s\n", key, result);
-	clearCache();
+void copyRequest(char * dest) {
+	pthread_mutex_lock(&bufferLock);
+	strcpy(dest, buffer);
+	pthread_mutex_unlock(&bufferLock);
 }
+
+
+void * serveRequest() {
+	printf("Thread %d starting.\n", syscall(SYS_gettid));
+	char sentence[256];
+	char * result;
+	copyRequest(sentence);
+	FIELDS * f = (FIELDS *)malloc(sizeof(FIELDS));
+	*(sentence + strlen(sentence) - 1) = '\0';
+	parseSentence(f, sentence);
+	if (f->isGet) {
+		result = get(f->key);
+		printf("Value of key %s : %s\n", f->key, result);
+	}
+	else {
+		put(f->key, f->val, 100, 0);
+	}
+	free(f);
+	printf("Thread %d exiting.\n", syscall(SYS_gettid));
+}
+
+
+int main() {
+	puts("Server starting.");
+	pthread_mutex_init(&cacheLock, NULL);
+	pthread_mutex_init(&bufferLock, NULL);
+	while (fgets(buffer, 256, stdin) != NULL) {
+		pthread_t childThread;
+		pthread_create(&childThread, NULL, serveRequest, NULL);
+		// Call join with no hang (asynchronous wait) to log child's exit status
+	}
+	puts("Server exiting.");
+	clearCache();
+	exit(0);
+}
+
