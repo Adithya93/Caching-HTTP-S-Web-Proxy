@@ -1,0 +1,11 @@
+fork to generate a new process, parent exits
+fork again to ensure new child is not a process group leader
+use setsid() to lose controlling terminal and become session leader
+close file descriptors with dup2 of stin, stdout and stderr to /dev/null
+change directory to "/"
+
+the 'daemon' syscall does the above
+
+good to do:
+fork again to become not session leader, because if a session leader were to open a terminal, that terminal would become controlling terminal
+umask(0) -> files created with certain mode will actually get that mode & ~umask, so if umask(0) then process will get the mode it wants
