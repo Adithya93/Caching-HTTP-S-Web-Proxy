@@ -334,8 +334,9 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
 	printf("Read %d bytes from origin server, done reading for now, writing to client\n", readFromOriginServer);
 	if ((writtenToClient = write(connFd, responseHeaderBuf, readFromOriginServer)) < 0) {
 	  perror("Error forwarding encrypted response from server to client");
-	  exitRequest(connFd, reqInf, request, servinfo);
-	  return;
+	  //exitRequest(connFd, reqInf, request, servinfo);
+	  done = 1;
+	  //return;
 	}
 	printf("Wrote %d bytes to client\n", writtenToClient);
 	/* SAFE to exit here? Or must try reading again?
@@ -349,7 +350,8 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
 	  return;
 	}
 	if (readAgain == 0) done = 1;
-	*/done = 1; // TEMP
+	*/
+	done = 1; // TEMP
       }
       puts("TUNNELING COMPLETE");
       // Maybe this tells client that its over?
@@ -371,27 +373,61 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
     // Read and write to client in loop
     // RESPONSE_HEADER_SIZE refers to max buffer size
     // Should use content-length header if available
-    while ((readFromOrigin = read(forwardSock, responseHeaderBuf, RESPONSE_HEADER_SIZE)) == RESPONSE_HEADER_SIZE) {
-      printf("Read buffer from origin server full at %d bytes, draining to client before next read\n", RESPONSE_HEADER_SIZE);
-      writtenToClient = write(connFd, responseHeaderBuf, strlen(responseHeaderBuf));
-      totalWrittenToClient += writtenToClient;
+    int done = 0;
+    while (!done) {
+      while ((readFromOrigin = read(forwardSock, responseHeaderBuf, RESPONSE_HEADER_SIZE)) == RESPONSE_HEADER_SIZE) {
+	printf("Read buffer from origin server full at %d bytes, draining to client before next read\n", RESPONSE_HEADER_SIZE);
+	writtenToClient = write(connFd, responseHeaderBuf, strlen(responseHeaderBuf));
+	totalWrittenToClient += writtenToClient;
+	totalReadFromOrigin += readFromOrigin;
+	memset(responseHeaderBuf, '\0', RESPONSE_HEADER_SIZE);
+      }
+      printf("Read fewer bytes than maximum buffer size from origin server : %d\n", readFromOrigin);
       totalReadFromOrigin += readFromOrigin;
+      if (readFromOrigin < 0) {
+	perror("ERROR reading response from origin server");
+	//exitRequest(connFd, host, request, servinfo);
+	exitRequest(connFd, reqInf, request, servinfo);
+	return;
+      }
+      if (readFromOrigin == 0) {
+	puts("Done reading from server, exiting forwarding loop");
+	done = 1;
+      }
+      else {
+	writtenToClient = write(connFd, responseHeaderBuf, strlen(responseHeaderBuf));
+	totalWrittenToClient += writtenToClient;
+	printf("Total bytes written to client : %d\n", totalWrittenToClient);
+	if (totalWrittenToClient < 0 ) {
+	  perror("ERROR writing server's response to client");
+	  exitRequest(connFd, reqInf, request, servinfo);
+	  return;
+	}
+	memset(responseHeaderBuf, '\0', RESPONSE_HEADER_SIZE);
+	
+	// TEMP: Try reading to catch SIGPIPE - NVM DOESN'T WORK
+	int testClose;
+	if ((testClose = write(connFd, "\0", 0)) < 0) {
+	  perror("Client socket closed?");
+	  done = 1;
+	}
+	else puts("Re-entering forwarding loop");
+      }
+      /*
+      puts("Testing if server still has bytes to read");
+      // TEMP
       memset(responseHeaderBuf, '\0', RESPONSE_HEADER_SIZE);
+      readFromOrigin = read(forwardSock, responseHeaderBuf, RESPONSE_HEADER_SIZE);
+      printf("Test bytes read: %d\n", readFromOrigin);
+      if (readFromOrigin < 0) {
+	perror("ERROR reading response from origin server");
+	exitRequest(connFd, reqInf, request, servinfo);
+      }
+      if (readFromOrigin == 0) done = 1;
+      else puts("Re-entering forwarding loop");
+      */
     }
-    printf("Read fewer bytes than maximum buffer size from origin server : %d\n", readFromOrigin);
-    totalReadFromOrigin += readFromOrigin;
-    if (readFromOrigin < 0) {
-      perror("ERROR reading response from origin server");
-      //exitRequest(connFd, host, request, servinfo);
-      exitRequest(connFd, reqInf, request, servinfo);
-      return;
-    }
-    writtenToClient = write(connFd, responseHeaderBuf, strlen(responseHeaderBuf));
-    totalWrittenToClient += writtenToClient;
-    printf("Total bytes written to client : %d\n", totalWrittenToClient);
-    if (totalWrittenToClient < 0 ) {
-      perror("ERROR writing server's response to client");
-    }
+    printf("Done servicing request, total bytes written from server to client : %d\n", totalWrittenToClient);
     exitRequest(connFd, reqInf, request, servinfo);
 }
 
@@ -475,6 +511,10 @@ void quit() {
   exit(0);
 }
 
+void socketCloseAlert() {
+  puts("SOCKET CLOSED");
+}
+
 int main(int argc, char **argv) {
   // Daemonize
   /*pid_t pid;*/
@@ -512,6 +552,9 @@ int main(int argc, char **argv) {
   pthread_mutex_init(&exitMutex, NULL);
   printf("Main thread of id %ld about to spawn pool threads\n", syscall(SYS_gettid));
   signal(SIGINT, quit);
+
+  signal(SIGPIPE, socketCloseAlert);
+  
   puts("Registered keyboard-interrupt signal-handler");
   spawnThreads();
   struct sockaddr_in serveraddr, cliaddr;
