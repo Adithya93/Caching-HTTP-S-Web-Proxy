@@ -1,4 +1,4 @@
-/* 
+/*
  * A simple HTTP server with thread pool
  */
 #include <stdio.h>
@@ -8,10 +8,13 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <netdb.h> 
+#include <netdb.h>
 #include <pthread.h>
 #include <syscall.h>
 #include <signal.h>
+//#include "./cache.c"
+
+
 
 #define BUFSIZE 1024
 #define PORTNAME 80
@@ -19,6 +22,8 @@
 #define RESPONSE_HEADER_SIZE 8192
 #define HTTP_PORT 80
 #define HTTPS_PORT 443
+
+int DEBUG = 1;
 
 const char *LOGFILE_PATH = "/var/log/erss-proxy.log";
 const char * HTTP = "http";
@@ -34,12 +39,13 @@ typedef struct stack {
 typedef struct reqInfo {
   int reqType;
   int isHttps;
-  char * host;
+  char *host;
+  char *URI;
 } ReqInfo;
 
 STACK * requests;
 pthread_t ** threads;
-/* 
+/*
  * error - wrapper for perror
  */
 void error(char *msg) {
@@ -59,7 +65,7 @@ int serviced = 0;
 int listenfd, portno, n;
 
 int stackEmpty() {
-  return requests != NULL && requests->fd ? 0 : 1;
+  return (requests != NULL && requests->fd) ? 0 : 1;
 }
 
 STACK * pop() {
@@ -94,7 +100,7 @@ void push(int fd) {
   requests = newReq;
   //pthread_cond_broadcast(&stackCond);
   pthread_cond_signal(&stackCond);
-  pthread_mutex_unlock(&stackMutex);	
+  pthread_mutex_unlock(&stackMutex);
 }
 
 void incrExit(int reqsServiced) {
@@ -103,6 +109,12 @@ void incrExit(int reqsServiced) {
   if (++exited == POOLSIZE) {
     printf("Last thread %ld exiting, about to signal main thread\n", threadId);
     pthread_cond_signal(&exitCond);
+  }
+  else {
+    //puts("Waking up next thread");
+    puts("Waking up all waiting threads");
+    //pthread_cond_signal(&stackCond);
+    pthread_cond_broadcast(&stackCond);
   }
   printf("Thread %ld is %d to exit\n", threadId, exited);
   serviced += reqsServiced;
@@ -117,6 +129,12 @@ void logToFile(char *msg) {
   fprintf(f_p, "%s",msg);
   fclose(f_p);
 }
+/*
+   cacheResult cacheable(ReqInfo * reqInf) {
+// temp
+return MISS;
+}
+*/
 
 void exitRequest(int connFd, ReqInfo * reqInf, char * request, struct addrinfo * servinfo) {
   long threadId = syscall(SYS_gettid);
@@ -135,13 +153,13 @@ void exitRequest(int connFd, ReqInfo * reqInf, char * request, struct addrinfo *
 }
 
 ReqInfo * parseRequest(char * stringBuffer) {
-  printf("About to parse request of stringBuffer %p\n", stringBuffer);
-  printf("Length of request string: %d\n", (int)strlen(stringBuffer));
+  printf("[parseRequest()] About to parse request of stringBuffer %p\n", stringBuffer);
+  printf("[parseRequest()] Length of request string: %d\n", (int)strlen(stringBuffer));
   if (strlen(stringBuffer) <= 4) {
-    puts("Empty request string, returning NULL");
+    puts("[parseRequest()] Empty request string, returning NULL");
     return NULL;
   }
-  puts("Request string:");
+  puts("[parseRequest()] Request string:");
   printf("---:\n");
   printf("%s", stringBuffer);
   printf("---:\n");
@@ -149,6 +167,7 @@ ReqInfo * parseRequest(char * stringBuffer) {
   int reqType = 0, isHttps = 0, lineNum = 0;
   int isKeepAlive = 0;// TODO
   char * host, * line, * body, * headers;
+  char * URI;
   while ((line = strsep(&stringBuffer, "\n")) != NULL) {
     lineNum ++;
     printf("Line %d : %s\n", lineNum, line);
@@ -157,63 +176,67 @@ ReqInfo * parseRequest(char * stringBuffer) {
       char * word;
       char * originalLine = line;
       while ((word = strsep(&line, " ")) != NULL) {
-        if (strcmp(word, "GET") == 0) {
-          puts("GET request detected!");
+        if (strcasecmp(word, "GET") == 0) {
+          puts("[parseRequest()] GET request detected!");
           reqType = 0;
         }
-        else if (strcmp(word, "CONNECT") == 0) {
+        else if (strcasecmp(word, "CONNECT") == 0) {
           puts("CONNECT request detected!");
           reqType = 1;
           isHttps = 1;
         }
-        else if (strcmp(word, "POST") == 0) {
+        else if (strcasecmp(word, "POST") == 0) {
           puts("POST request detected!");
           reqType = 2;
         }
-        else if (strcmp(word, "HTTP/1.0\r") == 0) {
+        else if (strcasecmp(word, "HTTP/1.0\r") == 0) {
           puts("HTTP 1.0 request detected!");
         }
-        else if (strcmp(word, "HTTP/1.1\r") == 0) {
-          puts("HTTP 1.1 request detected!");        
+        else if (strcasecmp(word, "HTTP/1.1\r") == 0) {
+          puts("HTTP 1.1 request detected!");
         }
         else {
           printf("Is this the URI? %s\n", word);
+          URI = (char*) malloc((strlen(word) + 1) * sizeof(char));
+          strcpy(URI, word);
+          printf("URI saved as %s\n", URI);
         }
         // Reconstruct line
-        printf("Reconstructing first line from %s\n", originalLine);
+        /*printf("Reconstructing first line from %s\n", originalLine);*/
         if (line != NULL) *(originalLine + strlen(originalLine)) = ' ';
-        printf("First line is now %s\n", originalLine);
+        /*printf("First line is now %s\n", originalLine);*/
       }
-      puts("Reconstructed first line");
-      printf("%s\n", originalLine);
+      /*puts("Reconstructed first line");*/
+      /*printf("%s\n", originalLine);*/
     }
     else { // Different logic for parsing remaining lines as format is Header: <Header Value>
-      if (strcmp(line, "\r") == 0) {
-        puts("Detected END OF HEADERS!");
+      if (strcasecmp(line, "\r") == 0) {
+        puts("[parseRequest()] Detected END OF HEADERS!");
         break;
       }
       char * headerName = strsep(&line, ":");
-      printf("Header: %s\n", headerName);
-      printf("Header value: %s\n", line);
-      if (strcmp(headerName, "Host") == 0) { // Logic for parsing hostname
-        printf("Parsing host name from %s\n", line);
-        char * hostName = strsep(&line, ":"); // Sometimes port is mentioned as well
-        char * tempHost = hostName + 1;
-        printf("Deduced host name as %s\n", tempHost); // + 1 to account for space after Host:
+      printf("[parseRequest()] Header: %s\n", headerName);
+      printf("[parseRequest()] Header value: %s\n", line);
+
+      // Logic for parsing hostname
+      if (strcasecmp(headerName, "Host") == 0) {
+        printf("[parseRequest()] Parsing host name from %s\n", line);
+        char *hostName = strsep(&line, ":"); // TODO Sometimes port is mentioned as well
+        char *tempHost = hostName + 1;
+        printf("[parseRequest()] Deduced host name as %s\n", tempHost); // + 1 to account for space after Host:
         host = (char*) malloc((strlen(tempHost) + 1) * sizeof(char));
         strcpy(host, tempHost);
-        printf("Restoring host value header from %s\n", hostName);
+        printf("[parseRequest()] Restoring host value header from %s\n", hostName);
         if (line != NULL) {
           printf("Is this port? %s\n", line);
           *(hostName + strlen(hostName)) = ':';
         }
         else {
-          puts("No port mentioned in host header");
+          puts("[parseRequest()] No port mentioned in host header");
         }
-        printf("Restored host value header is %s\n", hostName);
-      }
-      else {
-        printf("Header: %s\n", headerName);
+        printf("[parseRequest()] Restored host value header is %s\n", hostName);
+      } else {
+        printf("[parseRequest()] Header: %s\n", headerName);
         // TO-DO : Choose important headers, add parsing logic and pass them to forwardRequest method
       }
       printf("Reconstructing header line from %s\n", headerName);
@@ -245,7 +268,7 @@ ReqInfo * parseRequest(char * stringBuffer) {
   *(toBeFreed + strlen(toBeFreed)) = '\n';
   printf("Recovered headers:\n%s", toBeFreed);
   puts("Merging headers and body for forwarding");
-  if (!emptyBody) *(toBeFreed + strlen(toBeFreed)) = '\n';            
+  if (!emptyBody) *(toBeFreed + strlen(toBeFreed)) = '\n';
   ReqInfo * parsedRequest = (ReqInfo *) malloc(sizeof(ReqInfo));
   parsedRequest->reqType = reqType;
   printf("Set reqType to %d\n", reqType);
@@ -253,6 +276,8 @@ ReqInfo * parseRequest(char * stringBuffer) {
   printf("Set isHttps to %d\n", isHttps);
   parsedRequest->host = host;
   printf("Set host to %s\n", host);
+  parsedRequest->URI = URI;
+  printf("Set URI to %s\n", URI);
   return parsedRequest;
 }
 
@@ -281,17 +306,17 @@ int parseResponse(char * responseHeaders) {
   while ((line = strsep(&responseHeaders, "\n")) != NULL) {
     lineNum ++;
     printf("Line : %s\n", line);
-    if (strcmp(line, "\r") == 0) {
-      puts("Detected END OF HEADERS!");
+    if (strcasecmp(line, "\r") == 0) {
+      puts("[parseResponse()] Detected END OF HEADERS!");
       break;
     }
     if (lineNum != 1) {
       char * headerName = strsep(&line, ":");
-      printf("Header: %s\n", headerName);
-      printf("Header value: %s\n", line);
+      printf("[parseResponse()] Header: %s\n", headerName);
+      printf("[parseResponse()] Header value: %s\n", line);
       // TO-DO : Choose important headers, add parsing logic and pass them to forwardRequest method
-      if (strcmp(headerName, contentLength) == 0) {
-        puts("Detected content-length header");
+      if (strcasecmp(headerName, contentLength) == 0) {
+        puts("[parseResponse()] Detected content-length header");
         printf("String length from number onwards: %d\n",(int)strlen(line + 1));
         *(line + strlen(line) - 1) = '\0';
         printf("Trimmed number literal: %s\n", line + 1);
@@ -299,16 +324,24 @@ int parseResponse(char * responseHeaders) {
         printf("Set content-length to %d\n", length);
         *(line + strlen(line)) = '\r';
       }
-      else if (strcmp(headerName, cacheControl) == 0) {
-        puts("Detected cache-control header");
+      else if (strcasecmp(headerName, cacheControl) == 0) {
+        // Logic for parsing cache-control policy
+        printf("[parseResponse()] Parsing cache-control from %s\n", line);
+        // cache-control can come in comma-delimited form like:
+        // Cache-Control: no-cache, no-store, must-revalidate, max-age=0, proxy-revalidate, no-transform, private
+        // make copy so that we dont have to restore commas...
+        char *copyOfLine = malloc((strlen(line) + 1)*sizeof(char));
+        char *cacheControlPolicy;
+        while ((cacheControlPolicy = strsep(&copyOfLine, ",")) != NULL){
+          printf("[parseResponse()] cache-control values include: %s \n", cacheControlPolicy);
+        }
         *(line + strlen(line) - 1) = '\0';
-        printf("Cache-control value: %s\n", line + 1);
-        // TEMP : Just ignore for now
+        // TODO : Just ignore for now
         *(line + strlen(line)) = '\r';
       }
-      printf("Reconstructing header line from %s\n", headerName);
+      printf("[parseResponse()] Reconstructing header line from %s\n", headerName);
       *(headerName + strlen(headerName)) = ':';
-      printf("Reconstructed header: %s\n", headerName);
+      printf("[parseResponse()] Reconstructed header: %s\n", headerName);
     }
     printf("Reconstructing headers from %s\n", toBeFreed);
     *(toBeFreed + strlen(toBeFreed)) = '\n';
@@ -395,6 +428,11 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
+  hints.ai_flags = AI_PASSIVE;    /* For wildcard IP address */
+  hints.ai_protocol = 0;
+  hints.ai_canonname = NULL;
+  hints.ai_addr = NULL;
+  hints.ai_next = NULL;
   const char * port = isHttps ? HTTPS : HTTP;
   int lookupResult;
   printf("Port: %s\n", port);
@@ -403,7 +441,7 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
   printf("Host for servinfo: %s\n", host);
   if ((lookupResult = getaddrinfo(host, port, &hints, &servinfo))) {
     gai_strerror(lookupResult);
-    perror("Unable to getaddrinfo");
+    puts("[forwardRequest()] Unable to getaddrinfo");
     printf("Servinfo: %p\n", servinfo);
     exitRequest(connFd, reqInf, request, NULL);
     return;
@@ -621,13 +659,14 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
         char *stringBuffer = malloc(BUFSIZE);
         printf("Allocated string buffer pointer %p\n", stringBuffer);
         // Only works if BUFSIZE > size of request, must use while loop
-        int rc = read(connFd,stringBuffer,BUFSIZE); 
+        int rc = read(connFd,stringBuffer,BUFSIZE);
         if (rc < 0) {
           printf("Thread id %ld unable to read from socket\n", threadId);
         }
         logToFile(stringBuffer);
         char * toBeFreed = stringBuffer; // value of stringBuffer will be modified by strsep, so need to remember pointer to free
         ReqInfo * parsedReq = parseRequest(stringBuffer);
+        //cacheResult cacheRes;
         if (parsedReq == NULL) {
           puts("Bad request detected, returning error");
           int errorWritten;
@@ -636,9 +675,24 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
           }
           exitRequest(connFd, parsedReq, toBeFreed, NULL);
         }
-        else forwardRequest(connFd, parsedReq, toBeFreed);// Blocking : Opens socket and connection to origin server, writing from that socket to client socket
+        /*
+           else if ((cacheRes = cacheable(parsedReq)) == HIT) {
+           printf("Request %s is cacheable!\n", parsedReq->URI);
+        // return resplu onse to client
+        exitRequest(connFd, parsedReq, toBeFreed, NULL); // TEMP
+        }
+        else {
+        printf("Request %s is not cacheable because %d\n", parsedReq->URI, cacheRes);
+        forwardRequest(connFd, parsedReq, toBeFreed);// Blocking : Opens socket and connection to origin server, writing from that socket to client socket
+        }
+        */
+        else forwardRequest(connFd, parsedReq, toBeFreed);
+        puts("Done servicing request");
       }
       //pthread_mutex_unlock(&stackMutex);
+      else {
+        printf("Thread %lu woken up, trying to exit\n", syscall(SYS_gettid));
+      }
     }
     printf("Thread %ld exiting after serving %d requests\n", threadId, requestsServiced);
     incrExit(requestsServiced);
@@ -661,7 +715,7 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
       current = next;
     }
     for (int thread = 0; thread < POOLSIZE; thread ++) {
-      free(*(threads + thread));	
+      free(*(threads + thread));
     }
     free(threads);
   }
@@ -672,9 +726,9 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
     running = 0;
     pthread_cond_broadcast(&stackCond);
     pthread_mutex_unlock(&stackMutex);
-    puts("Main thread waiting for pool threads to exit");
+    if (DEBUG) puts("[quit()] Main thread waiting for pool threads to exit");
     pthread_cond_wait(&exitCond, &exitMutex);
-    printf("Main thread about to exit\n");
+    if (DEBUG) printf("[quit()] Main thread about to exit\n");
     freeAll();
     close(listenfd);
     pthread_mutex_unlock(&exitMutex);
@@ -682,8 +736,8 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
     pthread_mutex_destroy(&exitMutex);
     pthread_cond_destroy(&stackCond);
     pthread_cond_destroy(&exitCond);
-    puts("Freed all resources");
-    printf("Total requests serviced : %d\n", serviced);
+    if (DEBUG) puts("[quit()] Freed all resources");
+    if (DEBUG) printf("[quit()] Total requests serviced : %d\n", serviced);
     exit(0);
   }
 
@@ -742,7 +796,7 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
     portno = PORTNAME;
     /* socket: create the socket */
     listenfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (listenfd < 0) 
+    if (listenfd < 0)
       error("ERROR opening listening socket");
 
     /* build the server's Internet address */

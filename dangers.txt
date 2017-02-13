@@ -1,0 +1,11 @@
+How to close http connection gracefully?
+Failure to pass on effect of request headers such as keep-alive
+Failed malloc due to excessively large POST request bodies at high traffic
+Parsing error due to non-general assumptions about request header format
+Segmentation fault on request thread killing server
+Incorrect or excessive re-allocation of memory for string buffer to hold client request body
+Incorrect detection of EOF on client request or origin server response
+Failing to parse case-insensitive match on request/response headers
+POSIX standard does not guarantee writing the entire buffer passed to it.
+not checking and relaying encoding headers
+case-insensitive headers in req and res
