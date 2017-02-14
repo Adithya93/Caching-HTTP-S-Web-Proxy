@@ -92,7 +92,7 @@ void leftPadZeroes(char* b, int i, int desiredLength){
   }
   strncpy(b+difference, test, strlen(test));
   /*for (int j = difference; j < desiredLength; j++){*/
-    /*b[j] = test[j];*/
+  /*b[j] = test[j];*/
   /*}*/
   b[desiredLength] = "\0";
   printf("leftpadded: %s\n", b);

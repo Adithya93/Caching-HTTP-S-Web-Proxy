@@ -15,6 +15,7 @@ typedef struct node {
   char * key;
   char * val;
   long expiry; // Replace with ctime struct in future?
+  char * eTag;
   int needsRevalidation;
   struct node * next;
 } NODE;
@@ -28,7 +29,7 @@ typedef struct fields {
 NODE* MAP[100];
 char buffer[256];
 
-pthread_mutex_t bufferLock;
+//pthread_mutex_t bufferLock;
 pthread_mutex_t cacheLock;
 
 long currentTime = 0;// TEMP
@@ -47,10 +48,13 @@ void freeFields(FIELDS * f) {
 
 NODE * makeNode(char * key, char * val, long expiry, int needsRevalidation) {
   NODE * newNode = (NODE *)malloc(sizeof(NODE));
-  newNode->key = (char *)malloc((strlen(key) + 1) * sizeof(char));
-  strcpy(newNode->key, key);
-  newNode->val = (char *)malloc((strlen(val) + 1) * sizeof(char));
-  strcpy(newNode->val, val);
+  //newNode->key = (char *)malloc((strlen(key) + 1) * sizeof(char));
+  //strcpy(newNode->key, key);
+  printf("Allocated node %p\n", newNode);
+  newNode->key = key;
+  //newNode->val = (char *)malloc((strlen(val) + 1) * sizeof(char));
+  //strcpy(newNode->val, val);
+  newNode->val = val;
   newNode->expiry = expiry;
   newNode->needsRevalidation = needsRevalidation;
   newNode->next = NULL;
@@ -69,6 +73,7 @@ NODE * getNode(int bucket, char * key) {
   while (current != NULL) {
     if (strcmp(current->key, key) == 0) {
       printf("Found key %s, value is %s\n", key, current->val);
+      //puts("Returning node");
       return current;
     }
     current = current->next;
@@ -82,11 +87,14 @@ char * getValue(int bucket, char * key) {
   pthread_mutex_lock(&cacheLock);
   NODE * foundNode = getNode(bucket, key);
   char * result;
-  if (foundNode == NULL) {
+  puts("Testing validity in getValue method");
+  printf("Address of found node %p\n", foundNode);
+  if ((void*)foundNode == NULL) {
     printf("ID %s not in cache\n", key);
     //return NULL;
     result = NULL;
   }
+
   else if (foundNode->expiry < currentTime) {
     printf("ID %s found but expired\n", key);
     //return NULL;
@@ -97,7 +105,9 @@ char * getValue(int bucket, char * key) {
     //return NULL;
     result = NULL;
   }
+
   else {
+    printf("ID found and deemed valid");
     result = foundNode->val;
   }
   pthread_mutex_unlock(&cacheLock);
@@ -155,6 +165,7 @@ void clearCache() {
   }
 }
 
+/*
 void parseSentence(FIELDS * f, char * sentence) {
   char * getStatus = strtok(sentence, DELIM);
   if (getStatus == NULL) {
@@ -207,6 +218,11 @@ void * serveRequest() {
   }
   free(f);
   printf("Thread %lu exiting.\n", syscall(SYS_gettid));
+}
+*/
+
+int initCache() {
+  return pthread_mutex_init(&cacheLock, NULL);// || pthread_mutext_init(&bufferLock, NULL);
 }
 
 /*
