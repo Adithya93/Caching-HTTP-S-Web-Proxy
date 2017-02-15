@@ -88,11 +88,14 @@ int writeall(int fd, char *buf, int * len){
   int n;
 
   while (total < *len) {
+    //puts("About to call write");
     n = write(fd, buf+total, bytes_left);
+    //puts("Returned from write");
     if (n == -1) {
       perror("Socket %d returned error on write");
       return -1;
     }
+    
     total += n;
     bytes_left -= n;
   }
@@ -116,37 +119,55 @@ int transferChunks(int serverFd, int clientFd, char * buf, char ** cacheBuffPtr,
   int currentCacheBuffSize = (int)strlen(cacheBuff);
   int cacheFail = *canCache ? 0 : 1;
   int amountToWrite = BUFSIZE;
-  while (!done) {
-    if ((testRead = recv(serverFd, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) > 0) {
-      readNow = read(serverFd, buf, BUFSIZE);
-      puts("going into writeall");
-      writtenNow = writeall(clientFd, buf, &amountToWrite);
-      if (writtenNow < 0) {
-        return -1;
-      }
-      else if (!cacheFail) {
-        int cacheBuffLeft = currentCacheBuffCap - currentCacheBuffSize;
-        if (writtenNow > cacheBuffLeft) {
-          printf("Current capacity of cache buffer: %d, current size of cache buffer : %d, about to add %d bytes\n", currentCacheBuffCap, currentCacheBuffSize, writtenNow);
-          char * oldCacheBuff = cacheBuff;
-          if (!(cacheBuff = realloc(cacheBuff, 2 * currentCacheBuffCap * sizeof(char)))) {
-            printf("Unable to reallocate cache buffer to size %d\n", 2 * currentCacheBuffCap);
-            cacheFail = 1;
-          }
-          currentCacheBuffCap *= 2;
-          printf("Reallocated cache buffer from %p to %p, new capacity %d\n", oldCacheBuff, cacheBuff, currentCacheBuffCap);
-        }
-        strcat(cacheBuff, buf); // Only add for successful writes, and only cache at the end if entire write was successful
-        currentCacheBuffSize += writtenNow;
-      }
-      totalWritten += amountToWrite;
-      amountToWrite = BUFSIZE;
-    } else {
-      done = 1;
+  //while (!done) {
+  //if ((testRead = recv(serverFd, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) > 0) {
+  int grace = 100000;
+  while (grace > 0 && (testRead = recv(serverFd, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) != 0) {
+  //while (grace > 0 && (testRead = recv(serverFd, buf, BUFSIZE, MSG_PEEK | MSG_DONTWAIT)) != 0) { 
+    if (testRead < 0) {
+      usleep(2000);
+      grace --;
+      //perror("Error returned by testRead in transferChunks");
+      continue;
+    } 
+    readNow = read(serverFd, buf, BUFSIZE);
+    if (readNow < 0) {
+      perror("Unable to read from server in transferChunks");
+      *canCache = 0;
+      return -1;
     }
+    //puts("going into writeall");
+    amountToWrite = readNow;
+    writtenNow = writeall(clientFd, buf, &amountToWrite);
+    if (writtenNow < 0) {
+      puts("Writeall returned error");
+      *canCache = 0;
+      return -1;
+    }
+    else if (!cacheFail) {
+      int cacheBuffLeft = currentCacheBuffCap - currentCacheBuffSize;
+      if (writtenNow > cacheBuffLeft) {
+	printf("Current capacity of cache buffer: %d, current size of cache buffer : %d, about to add %d bytes\n", currentCacheBuffCap, currentCacheBuffSize, writtenNow);
+	char * oldCacheBuff = cacheBuff;
+        if (!(cacheBuff = realloc(cacheBuff, 2 * currentCacheBuffCap * sizeof(char)))) {
+	  printf("Unable to reallocate cache buffer to size %d\n", 2 * currentCacheBuffCap);
+	  cacheFail = 1;
+        }
+	currentCacheBuffCap *= 2;
+        printf("Reallocated cache buffer from %p to %p, new capacity %d\n", oldCacheBuff, cacheBuff, currentCacheBuffCap);
+      }
+      strcat(cacheBuff, buf); // Only add for successful writes, and only cache at the end if entire write was successful
+      currentCacheBuffSize += writtenNow;
+    }
+    totalWritten += amountToWrite;
+    amountToWrite = BUFSIZE;
+  // else {
+  // done = 1;
+  //}
     memset(buf, '\0', BUFSIZE);
   }
-  puts("Socket closed by server");
+  printf("Value of grace left in transferChunks: %d\n", grace);
+  //puts("Socket closed by server");
   printf("Total bytes written to client: %d\n", totalWritten);
   memset(buf, '\0', BUFSIZE);
   if (!cacheFail) {
