@@ -283,7 +283,7 @@ ReqInfo * parseRequest(char * stringBuffer, char *UID) {
       //split by spaces
       char * word;
       char * originalLine = line;
-      char *logline = malloc(50 * sizeof(char)); 
+      /*char *logline = malloc(50 * sizeof(char)); */
       /*sprintf(logline, "%s: \"%s\" from %*/
       while ((word = strsep(&line, " ")) != NULL) {
         if (strcasecmp(word, "GET") == 0) {
@@ -320,7 +320,7 @@ ReqInfo * parseRequest(char * stringBuffer, char *UID) {
       /*printf("%s\n", originalLine);*/
     }
     else { // Different logic for parsing remaining lines as format is Header: <Header Value>
-      if (strcasecmp(line, "\r") == 0) {'
+      if (strcasecmp(line, '\r') == 0) {
         puts("[parseRequest()] Detected END OF HEADERS!");
         break;
       }
@@ -330,7 +330,7 @@ ReqInfo * parseRequest(char * stringBuffer, char *UID) {
 
       // Logic for parsing hostname
       if (strcasecmp(headerName, "Host") == 0) {
-        /*printf("[parseRequest()] Parsing host name from %s\n", line);*/
+        printf("[parseRequest()] Parsing host name from %s\n", line);
         char *hostName = strsep(&line, ":"); // TODO Sometimes port is mentioned as well
         printf("[parseRequest()] Deduced initial hostname name as %s\n", hostName); // + 1 to account for space after Host:
         host = (char*) malloc((strlen(hostName)+1) * sizeof(char));
@@ -751,11 +751,11 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
     if (testRead > 0) {
       readNow = read(serverSock, revalidationHeaders, BUFSIZE);
       if (readNow < 0) {
-	puts("Error reading from server in revalidation");
-	return -1;
+        puts("Error reading from server in revalidation");
+        return -1;
       }
       else {
-	totalRead += readNow;
+        totalRead += readNow;
       }
     }
     else {
@@ -1114,14 +1114,33 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
         pthread_mutex_unlock(&stackMutex);
         int connFd = tos->fd;
         int clientLookup;
-        if ((clientLookup = getpeername(connFd, struct sockaddr *addr, socklen_t
-                   *addrlen)) < 0) {
+        struct sockaddr_storage addr;
+        socklen_t len;
+        // Build UID from threadID and request number
+        char *UID = malloc(30*sizeof(char));
+        sprintf(UID, "%lu%d\0", threadId, requestsServiced);
+        char ipstr[INET6_ADDRSTRLEN];
+        puts("ip lookup");
+        if ((clientLookup = getpeername(connFd, (struct sockaddr*)&addr, &len)) < 0) {
           printf("Unable to get client ip");
         }
-        requestsServiced ++;
+        if (addr.ss_family == AF_INET) {
+          struct sockaddr_in *s = (struct sockaddr_in *)&addr;
+          //port = ntohs(s->sin_port);
+          inet_ntop(AF_INET, &(s->sin_addr), ipstr, sizeof (ipstr));
+        } else { // AF_INET6
+          struct sockaddr_in6 *s = (struct sockaddr_in6 *)&addr;
+          //port = ntohs(s->sin6_port);
+          inet_ntop(AF_INET6, &(s->sin6_addr), ipstr, sizeof (ipstr));
+        }
+        char * ipString = (char *)malloc(100 * sizeof(char));
+        char *time = getCurrentTimeStr();
+        puts("ip lookup done");
+        sprintf(ipString, "%s: %s @ %s",UID, ipstr, time);
+        printf("%s\n",ipString);
+        logpush(ipString);
+        requestsServiced++;
         printf("Thread %ld servicing request using socket fd %d\n", threadId, connFd);
-        char *UID = malloc(30*sizeof(char))
-        sprintf(UID, "%lu%d\0", threadId, requestsServiced);
         free(tos);
         char response[23] = "Booyakasha Bounty!\r\n\r\n\0";
         char *stringBuffer = malloc(BUFSIZE);
@@ -1131,7 +1150,7 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
         if (rc < 0) {
           printf("Thread id %ld unable to read from socket\n", threadId);
         }
-        logToFile(stringBuffer);
+        //logToFile(stringBuffer);
         char * toBeFreed = stringBuffer; // value of stringBuffer will be modified by strsep, so need to remember pointer to free
         ReqInfo * parsedReq = parseRequest(stringBuffer, UID);
         cacheResult cacheRes;
@@ -1296,9 +1315,10 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
         pthread_mutex_init(&stackMutex, NULL);
         pthread_cond_init(&stackCond, NULL);
         pthread_mutex_init(&exitMutex, NULL);
+        initlogging(); //start logger thread
+        logpush("logger started..");
         printf("Main thread of id %ld about to spawn pool threads\n", syscall(SYS_gettid));
         signal(SIGINT, quit);
-
         signal(SIGPIPE, socketCloseAlert);
 
         puts("Registered keyboard-interrupt signal-handler");
@@ -1338,7 +1358,7 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request) {
             error("Unable to accept connection");
           }
           printf("Accepted new connection on socket %d\n", connfd);
-          push(connfd);
+          push(connfd, &cliaddr, &len);
           printf("Pushed connection %d onto stack\n", connfd);
         }
 

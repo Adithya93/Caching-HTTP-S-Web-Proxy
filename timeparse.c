@@ -5,9 +5,9 @@
 #include <time.h>
 
 enum s {DAY, DDAY, MONTH, YEAR, HR, MIN, SEC, TIMEZONE};
-// parse time of the format Expires: Thu, 01 Jan 1970 00:20:55 GMT
 
 struct tm *parseTime(char *timeStr){
+  // parse time of the format Expires: Thu, 01 Jan 1970 00:20:55 GMT
   struct tm* tmm = malloc(sizeof(struct tm));
   strptime(timeStr, "%a, %d %b %Y %H:%M:%S %Z", tmm);
   return tmm;
@@ -50,6 +50,17 @@ struct tm *getTimeFromExpiry(long expiry){
   return ret;
 }
 
+char *getCurrentTimeStr(){
+  time_t rawtime;
+  struct tm * timeinfo;
+  time (&rawtime);
+  timeinfo = localtime( &rawtime );
+  char *ret = malloc(50*sizeof(char));
+  memset(ret, '\0', 50*sizeof(char));
+  strcpy(ret, asctime(timeinfo));
+  return ret;
+}
+
 /*int    tm_sec   seconds [0,61]*/
 /*int    tm_min   minutes [0,59]*/
 /*int    tm_hour  hour [0,23]*/
@@ -77,4 +88,5 @@ struct tm *getTimeFromExpiry(long expiry){
   /*int b = timeAgtB(tmm2, tmm); //should return -1*/
   /*int c = timeAgtB(tmm, tmm); //should return 0*/
   /*printf("%d %d %d",a,b,c);*/
+  /*printf("%s", getCurrentTimeStr());*/
 /*}*/

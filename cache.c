@@ -11,6 +11,8 @@ char DELIM[2] = " \0";
 
 typedef enum {MISS, HIT, EXPIRED, REVALIDATE} cacheResult;
 
+// Implements a cache as a map of key (URI) to value (struct nodes). 
+// Hashmap handles collisions by appending nodes to the end of linked lists in each bucket.
 
 typedef struct cacheinfo {
   int needsRevalidation;
@@ -36,10 +38,8 @@ typedef struct fields {
 NODE* MAP[100];
 char buffer[256];
 
-//pthread_mutex_t bufferLock;
 pthread_mutex_t cacheLock;
 
-//long currentTime = 0;// TEMP
 
 void freeNode(NODE * old) {
   free(old->key);
@@ -50,40 +50,21 @@ void freeNode(NODE * old) {
   free(old->info);
   free(old);
 }
-/*
-void freeFields(FIELDS * f) {
-  free(f->key);
-  free(f->val);
-  free(f);
-}
-*/
 
 NODE * makeNode(char * key, char * val, char * host, CacheInfo * cacheInfo) {
   NODE * newNode = (NODE *)malloc(sizeof(NODE));
-  //newNode->key = (char *)malloc((strlen(key) + 1) * sizeof(char));
-  //strcpy(newNode->key, key);
   printf("Allocated node %p\n", newNode);
   newNode->key = key;
-  //newNode->val = (char *)malloc((strlen(val) + 1) * sizeof(char));
-  //strcpy(newNode->val, val);
   newNode->val = val;
   newNode->host = host;
-  //newNode->expiry = expiry;
-  //newNode->needsRevalidation = needsRevalidation;
   newNode->info = cacheInfo;
   newNode->next = NULL;
   return newNode;
 }
 
-/*
-NODE * setCacheControl(NODE * )
-*/
-
 void updateNode(NODE * node, char * value, CacheInfo * cacheInfo) {
   free(node->val);
   node->val = value;
-  //node->expiry = expiry;
-  //node->needsRevalidation = needsRevalidation;
   free(node->info);
   node->info = cacheInfo;
 }
@@ -93,7 +74,6 @@ NODE * getNode(int bucket, char * key) {
   while (current != NULL) {
     if (strcmp(current->key, key) == 0) {
       printf("Found key %s, value is %s\n", key, current->val);
-      //puts("Returning node");
       return current;
     }
     current = current->next;
@@ -114,30 +94,13 @@ char * getValue(int bucket, char * key) {
     //return NULL;
     result = NULL;
   }
-
-  /*
-  else if (foundNode->expiry < currentTime) {
-    printf("ID %s found but expired\n", key);
-    //return NULL;
-    result = NULL;
-  }
-  */
-  /*
-  else if (foundNode->needsRevalidation) {
-    printf("ID %s found but needs revalidation\n", key);
-    //return NULL;
-    result = NULL;
-  }
-  */
-
   else {
     printf("ID found and deemed valid");
     result = foundNode->val;
   }
   pthread_mutex_unlock(&cacheLock);
   return result;
-  //return foundNode->val;
-}
+  }
 
 void putKey(int bucket, char * key, char * value, char * host, CacheInfo * cacheInfo) {
   pthread_mutex_lock(&cacheLock);
@@ -167,16 +130,13 @@ int indexOf(char * key) { // Simple but weak hash function
   return index;
 }
 
-//char * get(char * key) {
 NODE * get(char * key) {
-//return getValue(indexOf(key), key);
   return getNode(indexOf(key), key);
 }
 
 void put(char * key, char * value, char * host, CacheInfo * cacheInfo) {
   return putKey(indexOf(key), key, value, host, cacheInfo);
 }
-
 
 void clearCache() {
   NODE * node;
@@ -191,66 +151,6 @@ void clearCache() {
   }
 }
 
-
-
-
-
-
-/*
-void parseSentence(FIELDS * f, char * sentence) {
-  char * getStatus = strtok(sentence, DELIM);
-  if (getStatus == NULL) {
-    perror("Insufficient fields");
-    exit(1);
-  }
-  f->isGet = strcmp(getStatus, "p");
-  printf("Is it a get request? %d\n", f->isGet);
-  getStatus = strtok(NULL, DELIM);
-  if (getStatus == NULL) {
-    perror("Insufficient fields");
-    exit(1);
-  }
-  printf("Key : %s\n", getStatus);
-  strcpy(f->key, getStatus);
-  if (!f->isGet) {
-    getStatus = strtok(NULL, DELIM);
-    if (getStatus == NULL) {
-      perror("Insufficient fields");
-      exit(1);
-    }
-    printf("Value : %s\n", getStatus);
-    strcpy(f->val, getStatus);
-  }
-  return;
-}
-
-
-void copyRequest(char * dest) {
-  pthread_mutex_lock(&bufferLock);
-  strcpy(dest, buffer);
-  pthread_mutex_unlock(&bufferLock);
-}
-
-
-void * serveRequest() {
-  printf("Thread %lu starting.\n", syscall(SYS_gettid));
-  char sentence[256];
-  char * result;
-  copyRequest(sentence);
-  FIELDS * f = (FIELDS *)malloc(sizeof(FIELDS));
-  *(sentence + strlen(sentence) - 1) = '\0';
-  parseSentence(f, sentence);
-  if (f->isGet) {
-    result = get(f->key);
-    printf("Value of key %s : %s\n", f->key, result);
-  }
-  else {
-    put(f->key, f->val, 100, 0);
-  }
-  free(f);
-  printf("Thread %lu exiting.\n", syscall(SYS_gettid));
-}
-*/
 
 int initCache() {
   return pthread_mutex_init(&cacheLock, NULL);// || pthread_mutext_init(&bufferLock, NULL);
@@ -270,5 +170,4 @@ puts("Server exiting.");
 clearCache();
 exit(0);
 }
-
 */
