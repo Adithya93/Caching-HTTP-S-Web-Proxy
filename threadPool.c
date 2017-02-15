@@ -74,6 +74,7 @@ int stackEmpty() {
 }
 
 STACK * pop() {
+  // used to track all incoming requests
   if (stackEmpty()) return NULL;
   STACK * tos = requests;
   requests = requests->next;
@@ -101,6 +102,7 @@ int writeall(int fd, char *buf, int * len){
 
 
 int transferChunks(int serverFd, int clientFd, char * buf, char ** cacheBuffPtr, int * canCache) {
+  // handles transfer encoding=chunked as well as revalidation responses from a server (that are not 304 not modified).
   int testRead = 0;
   int testWrite = 0;
   char testBuf[1];
@@ -120,7 +122,6 @@ int transferChunks(int serverFd, int clientFd, char * buf, char ** cacheBuffPtr,
       puts("going into writeall");
       writtenNow = writeall(clientFd, buf, &amountToWrite);
       if (writtenNow < 0) {
-        puts("writeall returned error, failing request"); // TODO - Write returnError method that can be called for all internal server errors
         return -1;
       }
       else if (!cacheFail) {
@@ -138,7 +139,6 @@ int transferChunks(int serverFd, int clientFd, char * buf, char ** cacheBuffPtr,
         strcat(cacheBuff, buf); // Only add for successful writes, and only cache at the end if entire write was successful
         currentCacheBuffSize += writtenNow;
       }
-      //totalWritten += writtenNow;
       totalWritten += amountToWrite;
       amountToWrite = BUFSIZE;
     } else {
@@ -177,6 +177,7 @@ void push(int fd, struct sockaddr * SA, struct socklen_t * AL) {
 }
 
 void incrExit(int reqsServiced) {
+  // threads call this when they terminate.
   pthread_mutex_lock(&exitMutex);
   long threadId = syscall(SYS_gettid);
   if (++exited == POOLSIZE) {
@@ -191,14 +192,6 @@ void incrExit(int reqsServiced) {
   pthread_mutex_unlock(&exitMutex);
 }
 
-void logToFile(char *msg) {
-  FILE* f_p;
-  f_p = fopen(LOGFILE_PATH, "a+");
-  if (f_p == NULL)
-    exit(EXIT_FAILURE);
-  fprintf(f_p, "%s",msg);
-  fclose(f_p);
-}
 
 // Check if in cache, not expired and doesn't need revalidation
 cacheResult cacheable(ReqInfo * reqInf, char ** cacheData) {
@@ -208,7 +201,6 @@ cacheResult cacheable(ReqInfo * reqInf, char ** cacheData) {
     //printf("About to store returned address %p into storing pointer %p\n", result, cacheData);
     printf("Retrieved node of address %p\n", result);
     // Check revalidation and expiry
-    // Expiry
     struct tm * currentTime = getCurrentTime(); // MUST FREE after checking
     printf("Current time pointer : %p\n", currentTime);
     printf("Result's info pointer: %p\n", result->info);
@@ -239,6 +231,7 @@ cacheResult cacheable(ReqInfo * reqInf, char ** cacheData) {
 
 
 void exitRequest(int connFd, ReqInfo * reqInf, char * request) {
+  // when a request is serviced, free all resources.
   long threadId = syscall(SYS_gettid);
   close(connFd);
   //free(host);
@@ -1108,7 +1101,6 @@ void * serviceRequest() {
       if (rc < 0) {
         printf("Thread id %ld unable to read from socket\n", threadId);
       }
-      //logToFile(stringBuffer);
       char * toBeFreed = stringBuffer; // value of stringBuffer will be modified by strsep, so need to remember pointer to free
       ReqInfo * parsedReq = parseRequest(stringBuffer, UID);
       cacheResult cacheRes;
