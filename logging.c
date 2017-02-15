@@ -10,7 +10,8 @@
 #include <syscall.h>
 #include <signal.h>
 
-#define LOGFILE "hi.txt"
+#define LOGFILE "/var/log/erss-proxy.log"
+
 pthread_mutex_t qMutex;
 pthread_cond_t qCond;
 int loggerrunning = 1;
@@ -77,7 +78,7 @@ void *logpush(char* msg) {
 void *writeLog(void *intP){
   // called by logger thread to write logfiles by popping log requests off a queue. 
   int *runningP = (int *) intP;
-  FILE *logfileP = fopen(LOGFILE, "a");
+  FILE *logfileP = fopen(LOGFILE, "a+");
   printf("writing to %S", LOGFILE);
   char *buff = malloc(sizeof(char)*50);   
   pthread_mutex_lock(&qMutex);
@@ -93,6 +94,7 @@ void *writeLog(void *intP){
     }
     memset(buff, 0, 50*sizeof(char));
   }
+  fclose(logfileP);
   free(buff);
   exit(0);
 }
