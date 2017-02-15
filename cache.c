@@ -3,6 +3,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <syscall.h>
+#include <time.h>
 
 /* A simple cache */
 int NUM_BUCKETS = 100;
@@ -11,12 +12,18 @@ char DELIM[2] = " \0";
 typedef enum {MISS, HIT, EXPIRED, REVALIDATE} cacheResult;
 
 
-typedef struct node {
-  char * key;
-  char * val;
-  long expiry; // Replace with ctime struct in future?
-  char * eTag;
+typedef struct cacheinfo {
   int needsRevalidation;
+  struct tm * expiryTime;
+  char *eTag;
+} CacheInfo;
+
+
+typedef struct node {
+  char *key;
+  char *val;
+  char *host;
+  CacheInfo * info;
   struct node * next;
 } NODE;
 
@@ -32,21 +39,26 @@ char buffer[256];
 //pthread_mutex_t bufferLock;
 pthread_mutex_t cacheLock;
 
-long currentTime = 0;// TEMP
+//long currentTime = 0;// TEMP
 
 void freeNode(NODE * old) {
   free(old->key);
   free(old->val);
+  free(old->info->eTag);
+  free(old->host);
+  free(old->info->expiryTime);
+  free(old->info);
   free(old);
 }
-
+/*
 void freeFields(FIELDS * f) {
   free(f->key);
   free(f->val);
   free(f);
 }
+*/
 
-NODE * makeNode(char * key, char * val, long expiry, int needsRevalidation) {
+NODE * makeNode(char * key, char * val, char * host, CacheInfo * cacheInfo) {
   NODE * newNode = (NODE *)malloc(sizeof(NODE));
   //newNode->key = (char *)malloc((strlen(key) + 1) * sizeof(char));
   //strcpy(newNode->key, key);
@@ -55,17 +67,25 @@ NODE * makeNode(char * key, char * val, long expiry, int needsRevalidation) {
   //newNode->val = (char *)malloc((strlen(val) + 1) * sizeof(char));
   //strcpy(newNode->val, val);
   newNode->val = val;
-  newNode->expiry = expiry;
-  newNode->needsRevalidation = needsRevalidation;
+  newNode->host = host;
+  //newNode->expiry = expiry;
+  //newNode->needsRevalidation = needsRevalidation;
+  newNode->info = cacheInfo;
   newNode->next = NULL;
   return newNode;
 }
 
-void updateNode(NODE * node, char * value, long expiry, int needsRevalidation) {
+/*
+NODE * setCacheControl(NODE * )
+*/
+
+void updateNode(NODE * node, char * value, CacheInfo * cacheInfo) {
   free(node->val);
   node->val = value;
-  node->expiry = expiry;
-  node->needsRevalidation = needsRevalidation;
+  //node->expiry = expiry;
+  //node->needsRevalidation = needsRevalidation;
+  free(node->info);
+  node->info = cacheInfo;
 }
 
 NODE * getNode(int bucket, char * key) {
@@ -95,16 +115,20 @@ char * getValue(int bucket, char * key) {
     result = NULL;
   }
 
+  /*
   else if (foundNode->expiry < currentTime) {
     printf("ID %s found but expired\n", key);
     //return NULL;
     result = NULL;
   }
+  */
+  /*
   else if (foundNode->needsRevalidation) {
     printf("ID %s found but needs revalidation\n", key);
     //return NULL;
     result = NULL;
   }
+  */
 
   else {
     printf("ID found and deemed valid");
@@ -115,18 +139,18 @@ char * getValue(int bucket, char * key) {
   //return foundNode->val;
 }
 
-void putKey(int bucket, char * key, char * value, long expiry, int needsRevalidation) {
+void putKey(int bucket, char * key, char * value, char * host, CacheInfo * cacheInfo) {
   pthread_mutex_lock(&cacheLock);
   NODE * targetNode = getNode(bucket, key);
   if (targetNode == NULL) {
-    targetNode = makeNode(key, value, expiry, needsRevalidation);
+    targetNode = makeNode(key, value, host, cacheInfo);
     targetNode->next = MAP[bucket];
     MAP[bucket] = targetNode;
-    printf("Added new key %s to cache with value %s, expiry %lu and revalidation status %d\n", key, value, expiry, needsRevalidation);
+    printf("Added new key %s to cache with value %s, cacheInfo ptr %p\n", key, value, cacheInfo);
   }
   else {
-    updateNode(targetNode, value, expiry, needsRevalidation);
-    printf("Updated value as %s, expiry as %lu and revalidation status as %d of key %s in cache\n", value, expiry, needsRevalidation, key);
+    updateNode(targetNode, value, cacheInfo);
+    printf("Updated value as %s, cacheInfo ptr of %p for key %s in cache\n", value, cacheInfo, key);
   }
   pthread_mutex_unlock(&cacheLock);
 }
@@ -143,12 +167,14 @@ int indexOf(char * key) { // Simple but weak hash function
   return index;
 }
 
-char * get(char * key) {
-  return getValue(indexOf(key), key);
+//char * get(char * key) {
+NODE * get(char * key) {
+//return getValue(indexOf(key), key);
+  return getNode(indexOf(key), key);
 }
 
-void put(char * key, char * value, long expiry, int needsRevalidation) {
-  return putKey(indexOf(key), key, value, expiry, needsRevalidation);
+void put(char * key, char * value, char * host, CacheInfo * cacheInfo) {
+  return putKey(indexOf(key), key, value, host, cacheInfo);
 }
 
 
@@ -164,6 +190,11 @@ void clearCache() {
     }
   }
 }
+
+
+
+
+
 
 /*
 void parseSentence(FIELDS * f, char * sentence) {

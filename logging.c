@@ -11,7 +11,7 @@
 #include <signal.h>
 
 #define LOGFILE "hi.txt"
-int DEBUG = 1;
+
 int running = 1;
 pthread_mutex_t qMutex;
 pthread_cond_t qCond;
@@ -29,16 +29,16 @@ int queueEmpty() {
   return pendingLogs == NULL;
 }
 
-int pop(char* msg, int buffersize) {
+int logpop(char* msg, int buffersize) {
   if (DEBUG) puts("popping");
   pthread_mutex_lock(&qMutex);
   if (queueEmpty()){
-    puts("q empty");
+    if (DEBUG) puts("q empty");
     pthread_mutex_unlock(&qMutex);
     return 1;
   }
   else {
-    puts("q NOT empty");
+    if (DEBUG) puts("q NOT empty");
     Queue *currentP = pendingLogs;
     Queue *prevP = NULL;
     while (currentP->next != NULL){
@@ -47,7 +47,7 @@ int pop(char* msg, int buffersize) {
     }
     strncpy(msg, currentP->message, currentP->length);
     msg[(currentP->length)] = '\0';
-    puts("freeing currentP");
+    if (DEBUG) puts("freeing currentP");
     free(currentP);
     currentP = NULL;
     if (prevP){
@@ -62,7 +62,7 @@ int pop(char* msg, int buffersize) {
   }
 }
 
-void *push(char* msg) {
+void *logpush(char* msg) {
   Queue *newQueueP = malloc(sizeof(*newQueueP));
   newQueueP->message = malloc(strlen(msg)*sizeof(char)+1);
   newQueueP->length = strlen(msg);
@@ -110,9 +110,9 @@ void *writeLog(void *intP){
     pthread_mutex_unlock(&qMutex);
     // ---- BUILD UID ----
     //uid will have first 6 digits as request num and last 6 as random num.
-    int seqNum = 11;
-    char uid[13];
-    leftPadZeroes(uid, seqNum, 6);
+    /*int seqNum = 11;*/
+    /*char uid[13];*/
+    /*leftPadZeroes(uid, seqNum, 6);*/
     /*uid[13] = "\0";*/
     /*char *randomPortion = uid + 6;*/
     /*sprintf(uid, "%d", seqNum);*/
@@ -128,39 +128,39 @@ void *writeLog(void *intP){
     memset(buff, 0, 50*sizeof(char));
   }
   free(buff);
-  puts("thread exited");
+  if (DEBUG) puts("thread exited");
   exit(0);
 }
 
 
-int main(int argc, char **argv) {
-  // initalize logger thread, push some stuff onto q, and let logger thread loose.
-  pthread_t logThread;
-  int rc;
-  rc = pthread_create(&logThread, NULL, writeLog, &running);
-  if (rc){
-    printf("ERROR; return code from pthread_create() is %d\n", rc);
-    exit(-1);
-  }
-  puts("created thread");
-  char *b1 = malloc(20);
-  pop(b1, 20);
-  pop(b1, 20);
-  pop(b1, 20);
-  char s1[] = "hello hello hello hello\0";
-  char s2[] = "from\0";
-  char s3[] = "the\0";
-  char s4[] = "other\0";
-  char s5[] = "side\0";
-  push(s1);
-  push(s2);
-  push(s3);
-  push(s4);
-  push(s5);
-  printf("%d\n",pendingLogs==NULL);
-  while (!queueEmpty()){
-    continue;
-  }
-  running = 0;
-  puts("done!");
-}
+/*int main(int argc, char **argv) {*/
+  /*// initalize logger thread, push some stuff onto q, and let logger thread loose.*/
+  /*pthread_t logThread;*/
+  /*int rc;*/
+  /*rc = pthread_create(&logThread, NULL, writeLog, &running);*/
+  /*if (rc){*/
+    /*printf("ERROR; return code from pthread_create() is %d\n", rc);*/
+    /*exit(-1);*/
+  /*}*/
+  /*puts("created thread");*/
+  /*char *b1 = malloc(20);*/
+  /*pop(b1, 20);*/
+  /*pop(b1, 20);*/
+  /*pop(b1, 20);*/
+  /*char s1[] = "hello hello hello hello\0";*/
+  /*char s2[] = "from\0";*/
+  /*char s3[] = "the\0";*/
+  /*char s4[] = "other\0";*/
+  /*char s5[] = "side\0";*/
+  /*push(s1);*/
+  /*push(s2);*/
+  /*push(s3);*/
+  /*push(s4);*/
+  /*push(s5);*/
+  /*printf("%d\n",pendingLogs==NULL);*/
+  /*while (!queueEmpty()){*/
+    /*continue;*/
+  /*}*/
+  /*running = 0;*/
+  /*puts("done!");*/
+/*}*/
