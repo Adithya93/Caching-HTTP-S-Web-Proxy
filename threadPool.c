@@ -88,9 +88,7 @@ int writeall(int fd, char *buf, int * len){
   int n;
 
   while (total < *len) {
-    //puts("About to call write");
     n = write(fd, buf+total, bytes_left);
-    //puts("Returned from write");
     if (n == -1) {
       perror("Socket %d returned error on write");
       return -1;
@@ -119,8 +117,6 @@ int transferChunks(int serverFd, int clientFd, char * buf, char ** cacheBuffPtr,
   int currentCacheBuffSize = (int)strlen(cacheBuff);
   int cacheFail = *canCache ? 0 : 1;
   int amountToWrite = BUFSIZE;
-  //while (!done) {
-  //if ((testRead = recv(serverFd, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) > 0) {
   int grace = 100000;
   while (grace > 0 && (testRead = recv(serverFd, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) != 0) {
   //while (grace > 0 && (testRead = recv(serverFd, buf, BUFSIZE, MSG_PEEK | MSG_DONTWAIT)) != 0) { 
@@ -747,8 +743,10 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
   }
   printf("Retrieved host as %s\n", host);
   char * revalidationTemplate = "GET %s HTTP/1.1\r\nIf-None-Match: %s\r\nHost: %s\r\n\r\n\0";
-  char revalidationHeaders[BUFSIZE];
-  memset(revalidationHeaders, '\0', BUFSIZE);
+  //char revalidationHeaders[BUFSIZE];
+  char revalidationHeaders[RESPONSE_HEADER_SIZE];
+  //memset(revalidationHeaders, '\0', BUFSIZE);
+  memset(revalidationHeaders, '\0', RESPONSE_HEADER_SIZE);
   if (sprintf(revalidationHeaders, revalidationTemplate, URI, eTag, host) < 0) {
     puts("GG I fucked up");
     return -1;
@@ -770,24 +768,23 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
   char testBuf[1];
   int readNow = 0;
   int totalRead = 0;
-  int grace = 10000;
-  memset(revalidationHeaders, '\0', BUFSIZE);
+  int grace = 100000;
+  //memset(revalidationHeaders, '\0', BUFSIZE);
+  memset(revalidationHeaders, '\0', RESPONSE_HEADER_SIZE);
   //while (totalRead < BUFSIZE && (testRead = recv(serverSock, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) > 0) {
-  while (grace > 0 && totalRead < BUFSIZE && (testRead = recv(serverSock, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) != 0) {
+  while (grace > 0 && (totalRead < RESPONSE_HEADER_SIZE - BUFSIZE) && (testRead = recv(serverSock, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) != 0) {
     if (testRead > 0) {
       readNow = read(serverSock, revalidationHeaders, BUFSIZE);
       if (readNow < 0) {
-        puts("Error reading from server in revalidation");
+        perror("Error reading from server in revalidation");
         return -1;
       }
-      else {
-        totalRead += readNow;
-      }
+      totalRead += readNow;
     }
     else {
-      //perror("Test read in revalidation returns error");
+      perror("Test read in revalidation returns error");
       grace --;
-      usleep(20);
+      usleep(200);
     }
   }
   printf("Bytes read from server: %d\n", totalRead);
@@ -1008,7 +1005,8 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
   // Write out buffer to client
   char * cacheBuff = (char *)malloc((RESPONSE_HEADER_SIZE + 1) * sizeof(char));
   memset(cacheBuff, '\0', RESPONSE_HEADER_SIZE);
-
+  char * cacheKey = (char *)malloc((strlen(reqInf->URI) + 1) * sizeof(char));
+  char * cacheHost = (char *)malloc((strlen(reqInf->host) + 1) * sizeof(char));
   /* SHOULD USE WRITEALL INSTEAD
   if ((writtenToClient = write(connFd, responseHeaderBuf, readFromOrigin)) < 0) {
     perror("Unable to do initial forwarding to client");
@@ -1021,11 +1019,20 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
   if (writeall(connFd, responseHeaderBuf, &writtenToClient) < 0) {
     puts("Error forwarding initial bytes to client after parsing response");
     exitRequest(connFd, reqInf, request);
+    puts("Freeing cacheInfo and cacheBuffer for premature exit");
+    free(cacheInfo);
+    free(cacheBuff);
     return;
   }
   printf("Wrote %d of the initial bytes to client\n", writtenToClient);
   if (serverAllowsCaching) {
     strncpy(cacheBuff, responseHeaderBuf, writtenToClient);
+    //cacheInfo->key = (char *)malloc((strlen(reqInf->URI) + 1) * sizeof(char));
+    strncpy(cacheKey, reqInf->URI, strlen(reqInf->URI) + 1);
+    printf("Set cache URI key to %s\n", cacheKey);
+    //cacheInfo->host = (char *)malloc((strlen(reqInf->host) + 1) * sizeof(char));
+    strncpy(cacheHost, reqInf->host, strlen(reqInf->host) + 1);
+    printf("Set cache URI host to %s\n", cacheHost);
   }
 
   totalWrittenToClient += writtenToClient;
@@ -1097,19 +1104,22 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
   }
   //printf("Finished servicing request with total of %d bytes written\n", totalWrittenToClient);
   printf("Finished servicing request to URI %s with a total of %d bytes written\n", reqInf->URI, totalWrittenToClient);
-  exitRequest(connFd, reqInf, request);
+  // CANNOT FREE HERE, WILL SCREW UP CACHING
+  //exitRequest(connFd, reqInf, request);
 
   if (!canCache) {
-    //printf("Not caching data for URI %s\n", reqInf->URI);
+    printf("Not caching data for URI %s\n", reqInf->URI);
     puts("Freeing cacheBuffer and cacheInfo");
     free(cacheBuff);
     free(cacheInfo);
-    puts("Freed cacheBuffer and cacheInfo");
+    free(cacheKey);
+    free(cacheHost);
+    puts("Freed cacheKey, cacheHost, cacheBuffer and cacheInfo");
   }
   //if (cacheBuff != NULL) {
   else {
     printf("Saving cached data for URI %s of length %d\n", reqInf->URI, (int)strlen(cacheBuff));
-    put(reqInf->URI, cacheBuff, reqInf->host, cacheInfo); // TEMP : Extract expiry and revalidation info from response
+    put(cacheKey, cacheBuff, cacheHost, cacheInfo); // TEMP : Extract expiry and revalidation info from response
   }
   /*
   else {
@@ -1118,6 +1128,9 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
   }
   */
   puts("About to return from forwardRequest method");
+
+  // Can only exitRequest after caching if necessary
+  exitRequest(connFd, reqInf, request);
   return;
 }
 
