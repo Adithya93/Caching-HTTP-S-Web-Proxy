@@ -62,11 +62,13 @@ NODE * makeNode(char * key, char * val, char * host, CacheInfo * cacheInfo) {
   return newNode;
 }
 
-void updateNode(NODE * node, char * value, CacheInfo * cacheInfo) {
+//void updateNode(NODE * node, char * value, CacheInfo * cacheInfo) {
+void updateNode(NODE * node, char * value) {
+  printf("Updating cache node %p\n", node);
   free(node->val);
   node->val = value;
-  free(node->info);
-  node->info = cacheInfo;
+  //free(node->info);
+  //node->info = cacheInfo;
 }
 
 NODE * getNode(int bucket, char * key) {
@@ -112,7 +114,8 @@ void putKey(int bucket, char * key, char * value, char * host, CacheInfo * cache
     printf("Added new key %s to cache with value %s, cacheInfo ptr %p\n", key, value, cacheInfo);
   }
   else {
-    updateNode(targetNode, value, cacheInfo);
+    //updateNode(targetNode, value, cacheInfo);
+    updateNode(targetNode, value);
     printf("Updated value as %s, cacheInfo ptr of %p for key %s in cache\n", value, cacheInfo, key);
   }
   pthread_mutex_unlock(&cacheLock);

@@ -117,11 +117,12 @@ int transferChunks(int serverFd, int clientFd, char * buf, char ** cacheBuffPtr,
   int currentCacheBuffSize = (int)strlen(cacheBuff);
   int cacheFail = *canCache ? 0 : 1;
   int amountToWrite = BUFSIZE;
-  int grace = 100000;
+  int grace = 10000;
+  puts("About to start transferring chunks");
   while (grace > 0 && (testRead = recv(serverFd, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) != 0) {
   //while (grace > 0 && (testRead = recv(serverFd, buf, BUFSIZE, MSG_PEEK | MSG_DONTWAIT)) != 0) { 
     if (testRead < 0) {
-      usleep(2000);
+      usleep(200);
       grace --;
       //perror("Error returned by testRead in transferChunks");
       continue;
@@ -719,6 +720,7 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
   //  If-None-Match: "1aa008f-2d-50a3559482cc0"
   //  Host: www.origin.com
 
+  // reqInf has host, URI and reqLine ptrs
   // Lookup URI in cache, retrieve node
   NODE * resultNode = get(URI);
   if (resultNode == NULL) { // GG
@@ -768,17 +770,23 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
   char testBuf[1];
   int readNow = 0;
   int totalRead = 0;
-  int grace = 100000;
+  int grace = 5000;
+
+  char canCache[26] = "HTTP/1.1 304 Not Modified\0";
+
+  int targetLen = strlen(canCache); // Only want to read this much and do strncasecmp before deciding what to do next
+  
   //memset(revalidationHeaders, '\0', BUFSIZE);
   memset(revalidationHeaders, '\0', RESPONSE_HEADER_SIZE);
   //while (totalRead < BUFSIZE && (testRead = recv(serverSock, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) > 0) {
-  while (grace > 0 && (totalRead < RESPONSE_HEADER_SIZE - BUFSIZE) && (testRead = recv(serverSock, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) != 0) {
+  while (grace > 0 && (totalRead < targetLen) && (testRead = recv(serverSock, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) != 0) {
     if (testRead > 0) {
       readNow = read(serverSock, revalidationHeaders, BUFSIZE);
       if (readNow < 0) {
         perror("Error reading from server in revalidation");
         return -1;
       }
+      printf("Read %d bytes of initial revalidation response from server\n", readNow);
       totalRead += readNow;
     }
     else {
@@ -787,14 +795,15 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
       usleep(200);
     }
   }
+  printf("Value of grace left for reading server revalidation initial response: %d\n", grace);
   printf("Bytes read from server: %d\n", totalRead);
   // Parse this and figure out if use cached or not
   //char * firstLine = strsep(&revalidationHeaders, "\r");
   //printf("First line: %s\n", firstLine);
   //304 Not Modified
-  char canCache[17] = "304 Not Modified\0";
+  //char canCache[27] = "HTTP/1.1 304 Not Modified\0";
   printf("revalidation headers: %s", revalidationHeaders);
-  if (strncasecmp(revalidationHeaders+9, canCache, 16) == 0) {
+  if (strncasecmp(revalidationHeaders, canCache, 25) == 0) {
     puts("Detected Not Modified!");
     return 0;
   }
@@ -815,6 +824,8 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
     int shouldCache = 1;
     int transferResult;
     strcpy(cacheBuff, revalidationHeaders);
+    memset(revalidationHeaders, '\0', RESPONSE_HEADER_SIZE);
+    puts("About to call transferChunks from getRevalidation method to transfer remaining response");
     if ((transferResult = transferChunks(serverSock, clientFd, revalidationHeaders, &cacheBuff, &shouldCache)) < 0) {
       puts("Unable to transfer all data to client");
       return -1;
@@ -824,7 +835,7 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
     if (shouldCache) {
       puts("About to cache new data from server");
       printf("Saving cached data for URI %s of length %d\n", reqInf->URI, (int)strlen(cacheBuff));
-      put(reqInf->URI, cacheBuff, host, resultNode->info); // TEMP : Update expiry for cache info?      
+      put(resultNode->key, cacheBuff, resultNode->host, resultNode->info); // Only cacheBuff new, and info ptr modified with its struct expiry * struct, rest same
     }
     else {
       puts("Write to client succeeded but not caching, freeing cacheBuffer");
@@ -1194,7 +1205,7 @@ void * serviceRequest() {
           puts("Error returning error response");
         }
         exitRequest(connFd, parsedReq, toBeFreed);
-      } else if ((cacheRes = cacheable(parsedReq, &cachedData)) == HIT) {
+      } else if ((cacheRes = cacheable(parsedReq, &cachedData)) == HIT) { 
         /*printf("Request %s is cacheable!\n", parsedReq->URI);*/
 
         char *log = malloc(50*sizeof(char));
@@ -1231,7 +1242,7 @@ void * serviceRequest() {
           else {
             puts("Successfully transferred cached data to client");
           }
-          exitRequest(connFd, parsedReq, toBeFreed);
+
         }
         else { // Need to revalidate - here, written to client and updates cache
           revalidationResult > 0 ? puts("New data written to client and cache updated") : puts("Error revalidating result");
