@@ -291,7 +291,7 @@ ReqInfo * parseRequest(char * stringBuffer, char *UID, char* ipstr) {
       memset(ipString, '\0', 120*sizeof(char));
       char *time = getCurrentTimeStr();
       puts("ip lookup done");
-      sprintf(ipString, "%s: %s from %s @ %s",UID, line, ipstr, time);//TODO
+      sprintf(ipString, "%s: %s from %s @ %s",UID, reqLinee, ipstr, time);//TODO
       logpush(ipString);
       free(ipString);
 
