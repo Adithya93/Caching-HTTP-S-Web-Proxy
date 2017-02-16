@@ -1328,12 +1328,12 @@ void * serviceRequest() {
     int main(int argc, char **argv) {
       // Daemonize
 
-      /*
+      
       if (daemon(0, 0) < 0) {
 	puts("Unable to daemonize");
 	exit(1);
       }
-      */
+      
 
       /*pid_t pid;*/
       /*pid = fork();*/
