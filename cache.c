@@ -70,13 +70,17 @@ void updateNode(NODE * node, char * key, char * value, char * host, CacheInfo * 
     printf("Detected change of cacheInfo in updateNode method, original cacheInfo ptr %p, new cacheInfo ptr %p\n", node->info, cacheInfo);
     free(node->info);
     node->info = cacheInfo;
+    //printf("New eTag: %s\n", node->info->eTag);
+  }
+  else { // in the case of handling revalidation, same cacheInfo ptr is passed in
+    printf("New eTag: %s\n", node->info->eTag);
   }
   if (node->key != key) {
-    printf("Freeing comparison key");
+    printf("Freeing comparison key %s\n", key);
     free(key);
   }
   if (node->host != host) {
-    printf("Freeing host ptr passed in to updateNode");
+    printf("Freeing host ptr %s passed in to updateNode\n", host);
     free(host);
   }
   puts("Done updating node");

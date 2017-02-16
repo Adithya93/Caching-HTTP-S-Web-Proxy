@@ -140,12 +140,13 @@ int transferChunks(int serverFd, int clientFd, char * buf, char ** cacheBuffPtr,
       if (writtenNow > cacheBuffLeft) {
         printf("Current capacity of cache buffer: %d, current size of cache buffer : %d, about to add %d bytes\n", currentCacheBuffCap, currentCacheBuffSize, writtenNow);
         char * oldCacheBuff = cacheBuff;
-        if (!(cacheBuff = realloc(cacheBuff, 2 * currentCacheBuffCap * sizeof(char)))) {
+	if (!(cacheBuff = realloc(cacheBuff, (2 * currentCacheBuffCap + 1) * sizeof(char)))) {
           printf("Unable to reallocate cache buffer to size %d\n", 2 * currentCacheBuffCap);
           cacheFail = 1;
         }
         currentCacheBuffCap *= 2;
-        printf("Reallocated cache buffer from %p to %p, new capacity %d\n", oldCacheBuff, cacheBuff, currentCacheBuffCap);
+	memset(cacheBuff + currentCacheBuffSize, '\0', currentCacheBuffCap + 1 - currentCacheBuffSize);
+	printf("Reallocated cache buffer from %p to %p, new capacity %d\n", oldCacheBuff, cacheBuff, currentCacheBuffCap);
       }
       strcat(cacheBuff, buf); // Only add for successful writes, and only cache at the end if entire write was successful
       currentCacheBuffSize += writtenNow;
@@ -600,24 +601,30 @@ int bufferedForward(int clientFd, int serverFd, char * serverBuff, char ** cache
     else {
       printf("Bytes read in this iteration: %d\n", readNow);
       totalRead += readNow;
-      if ((writeNow = write(clientFd, serverBuff, readNow)) < 0) {
-        perror("Error writing to client");
-        done = 1;
+      //if ((writeNow = write(clientFd, serverBuff, readNow)) < 0) {
+      //perror("Error writing to client");
+      writeNow = readNow;
+      if (writeall(clientFd, serverBuff, &writeNow) < 0) {
+	done = 1;
+	puts("Unable to write all to client in bufferedForward");
       }
       else {
         printf("Bytes written to client in this iteration: %d\n", writeNow);
         totalWritten += writeNow;
         if (!cacheFail) {
           int cacheBuffLeft = currentCacheBuffCap - currentCacheBuffSize;
-          if (writeNow > cacheBuffLeft) {
+	  printf("About to reallocate cacheBuff ptr from %p\n", cacheBuff);
+	  if (writeNow > cacheBuffLeft) {
             printf("Current capacity of cache buffer: %d, current size of cache buffer : %d, about to add %d bytes\n", currentCacheBuffCap, currentCacheBuffSize, writeNow);
             char * oldCacheBuff = cacheBuff;
-            if (!(cacheBuff = realloc(cacheBuff, 2 * currentCacheBuffCap * sizeof(char)))) {
+            if (!(cacheBuff = realloc(cacheBuff, (2 * currentCacheBuffCap + 1) * sizeof(char)))) {
               printf("Unable to reallocate cache buffer to size %d\n", 2 * currentCacheBuffCap);
               cacheFail = 1;
             }
+	    printf("Reallocated cacheBuff ptr: %p\n", cacheBuff);
             currentCacheBuffCap *= 2;
-            printf("Reallocated cache buffer from %p to %p, new capacity %d\n", oldCacheBuff, cacheBuff, currentCacheBuffCap);
+	    memset(cacheBuff + currentCacheBuffSize, '\0', currentCacheBuffCap + 1 - currentCacheBuffSize);
+            //printf("Reallocated cache buffer from %p to %p, new capacity %d\n", oldCacheBuff, cacheBuff, currentCacheBuffCap);
           }
           strcat(cacheBuff, serverBuff); // Only add for successful writes, and only cache at the end if entire write was successful
           currentCacheBuffSize += writeNow;
@@ -744,7 +751,7 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
   memset(revalidationHeaders, '\0', RESPONSE_HEADER_SIZE);
   while (grace > 0 && (totalRead < RESPONSE_HEADER_SIZE - BUFSIZE) && (testRead = recv(serverSock, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) != 0) {
     if (testRead > 0) {
-      readNow = read(serverSock, revalidationHeaders, BUFSIZE);
+      readNow = read(serverSock, revalidationHeaders + totalRead, BUFSIZE);
       if (readNow < 0) {
         perror("Error reading from server in revalidation");
         return -1;
@@ -753,7 +760,7 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
       totalRead += readNow;
     }
     else {
-      perror("Test read in revalidation returns error");
+      //perror("Test read in revalidation returns error");
       grace --;
       usleep(200);
     }
@@ -784,23 +791,57 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
     printf("Written %d initial bytes to client\n", initialWritten);
     char * cacheBuff = (char *) malloc((RESPONSE_HEADER_SIZE + 1) * sizeof(char));
     memset(cacheBuff, '\0', RESPONSE_HEADER_SIZE+1);
+    printf("Allocted cacheBuff ptr %p\n", cacheBuff);
     int shouldCache = 1;
     int transferResult;
     strcpy(cacheBuff, revalidationHeaders);
     memset(revalidationHeaders, '\0', RESPONSE_HEADER_SIZE);
+    printf("Current length of cacheBuffer: %d\n", (int)strlen(cacheBuff));
+    //printf("About to search for eTag in %s\n", cacheBuff);
 
     // Parse out new eTag with case-insensitive search
-    char * eTagNeedle = "\r\neTag: ";
+    char * eTagNeedle = "\r\neTag: \0";
     char * newETag = strcasestr(cacheBuff, eTagNeedle);
+    printf("cacheBuff ptr after strcasestr: %p\n", cacheBuff);
+    printf("Length of cacheBuffer after strcasestr: %d\n", (int)strlen(cacheBuff));
+
+    printf("newETag pointer: %p\n", newETag);
+    // Need to do some pointer manipulation since strcasestr doesn't compiler properly on linux with <string.h>
+    // Extract top 32 bits from cacheBuff
+    unsigned long cacheBuffUpper = ((unsigned long)cacheBuff) & ((((unsigned long)1 << 32) - 1) << 32);
+    printf("cacheBuffUpper: %p\n", (void *)cacheBuffUpper);
+    unsigned long newETagLower = (((unsigned long)1 << 32) - 1) & (unsigned long)(newETag);
+    printf("newETagLower: %p\n", (void*)newETagLower);
+    char * newETagPtr = (char *)(cacheBuffUpper | newETagLower);
+    printf("Reconstructed newETag ptr: %p\n", newETagPtr);
+    
+
+    char * foundTag;
     if (newETag == NULL) {
       puts("Unable to locate new eTag");
     }
     else {
+      newETag = newETagPtr + strlen(eTagNeedle); // for the /r/n
+      printf("newETag pointer: %p\n", newETag);
       puts("Found new eTag in revalidation response header!");
-      newETag += strlen(eTagNeedle);
-      printf("New eTag: %s\n", newETag);
+      printf("Original length of newTagPtr: %d\n", (int)strlen(newETag));
+      char * temp = strsep(&newETag, "\r");
+      if (temp == NULL) {
+	puts("Cannot find carriage return, buffer is");
+	puts(newETag);
+	newETag = NULL;
+      }
+      else {
+	printf("Extracted new eTag! : %s\n", temp);
+	foundTag = (char *) malloc((strlen(temp) + 1) * sizeof(char));
+	strncpy(foundTag, temp, strlen(temp) + 1);
+	printf("New eTag: %s\n", foundTag);
+      //free(newETagBuffer);
+      }
+      printf("Restoring temp from %s\n", temp);
+      *(temp + strlen(temp)) = '\r';
+      printf("Length of restored temp : %d\n", (int)strlen(temp));
     }
-
 
     puts("About to call transferChunks from getRevalidation method to transfer remaining response");
     if ((transferResult = transferChunks(serverSock, clientFd, revalidationHeaders, &cacheBuff, &shouldCache)) < 0) {
@@ -810,17 +851,10 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
     totalWritten += transferResult;
     // check if should cache, and do so
     if (shouldCache) {
-
-      struct tm* newTimeInfo = getCurrentTime();
-      free(resultNode->info->expiryTime);
-      resultNode->info->expiryTime = newTimeInfo;
-
       if (newETag != NULL) {
-        char * cacheNewETag = (char *)malloc(strlen(newETag) + 1);
-        strncpy(cacheNewETag, newETag, strlen(newETag) + 1);
-        free(resultNode->info->eTag);
-        resultNode->info->eTag = cacheNewETag;
-        printf("Successfully allocated cache eTag ptr %p and string %s\n", resultNode->info->eTag, resultNode->info->eTag);
+	free(resultNode->info->eTag);
+	resultNode->info->eTag = foundTag;
+	printf("Successfully allocated cache eTag ptr %p and string %s\n", resultNode->info->eTag, resultNode->info->eTag);
       }
       puts("About to cache new data from server");
       printf("Saving cached data for URI %s of length %d\n", reqInf->URI, (int)strlen(cacheBuff));
@@ -833,8 +867,6 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
   }
   return 1;
 }
-
-
 
 void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
 
@@ -999,7 +1031,9 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
   serverAllowsCaching ? puts("Server allows caching") : puts("Server forbids caching");
   // Write out buffer to client
   char * cacheBuff = (char *)malloc((RESPONSE_HEADER_SIZE + 1) * sizeof(char));
-  memset(cacheBuff, '\0', RESPONSE_HEADER_SIZE);
+  memset(cacheBuff, '\0', RESPONSE_HEADER_SIZE + 1);
+  printf("Allocated cacheBuff ptr %p\n", cacheBuff);
+  
   char * cacheKey = (char *)malloc((strlen(reqInf->URI) + 1) * sizeof(char));
   char * cacheHost = (char *)malloc((strlen(reqInf->host) + 1) * sizeof(char));
 
@@ -1019,6 +1053,7 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
 
   printf("Wrote %d of the initial bytes to client\n", writtenToClient);
 
+  /*
   // Log the first line sent 
   char * firstLine = strsep(&responseHeaderBuf, "\r");
   printf("Retrieved first line to be %s\n", firstLine);
@@ -1027,7 +1062,7 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
   sprintf(logFirstLine, "%s: responding %s", UID, firstLine);
   logpush(logFirstLine);
   free(logFirstLine);
-
+  */
 
   if (serverAllowsCaching) {
     strncpy(cacheBuff, responseHeaderBuf, writtenToClient);
@@ -1039,6 +1074,18 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
     printf("Set cache URI host to %s\n", cacheHost);
   }
 
+  // Log the first line sent
+  char * safeCopy = responseHeaderBuf;
+  //char * firstLine = strsep(&responseHeaderBuf, "\r");
+  char * firstLine = strsep(&safeCopy, "\r");
+  printf("Retrieved first line to be %s\n", firstLine);
+  char *logFirstLine = malloc(120*sizeof(char));
+  memset(logFirstLine, '\0', 120*sizeof(char));
+  sprintf(logFirstLine, "%s: responding %s", UID, firstLine);
+  logpush(logFirstLine);
+  free(logFirstLine);
+  
+  
   totalWrittenToClient += writtenToClient;
   int canCache = serverAllowsCaching;
   if (bodyLeft > 0 && isChunked == 0) {
