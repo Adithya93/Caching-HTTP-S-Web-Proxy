@@ -90,7 +90,8 @@ NODE * getNode(int bucket, char * key) {
   NODE * current = MAP[bucket];
   while (current != NULL) {
     if (strcmp(current->key, key) == 0) {
-      printf("Found key %s, value is %s\n", key, current->val);
+      //printf("Found key %s, value is %s\n", key, current->val);
+      printf("Found key %s\n", key);
       return current;
     }
     current = current->next;
@@ -125,11 +126,9 @@ void putKey(int bucket, char * key, char * value, char * host, CacheInfo * cache
     targetNode = makeNode(key, value, host, cacheInfo);
     targetNode->next = MAP[bucket];
     MAP[bucket] = targetNode;
-    printf("Added new key %s to cache with value %s, cacheInfo ptr %p\n", key, value, cacheInfo);
   }
   else {
     updateNode(targetNode, key, value, host, cacheInfo);
-    printf("Updated value as %s, cacheInfo ptr of %p for key %s in cache\n", value, cacheInfo, cacheInfo->key);
   }
   pthread_mutex_unlock(&cacheLock);
 }
