@@ -61,6 +61,13 @@ char *getCurrentTimeStr(){
   return ret;
 }
 
+char *getTimeFromStruct(struct tm* tmm){
+  char *ret = malloc(50*sizeof(char));
+  memset(ret, '\0', 50*sizeof(char));
+  strcpy(ret, asctime(tmm));
+  return ret;
+}
+
 /*int    tm_sec   seconds [0,61]*/
 /*int    tm_min   minutes [0,59]*/
 /*int    tm_hour  hour [0,23]*/
