@@ -27,11 +27,13 @@
 #define PRINTABLE_ASCII 32
 #define DEBUG 1
 #define MAX_LOG_LINE_LEN 200
+#define REVALIDATION_INFO_MISSING -2
 
 const char *LOGFILE_PATH = "/var/log/erss-proxy.log";
 const char *HTTP = "http";
 const char *HTTPS = "https";
-const char *BAD_REQUEST_RESPONSE = "HTTP/1.1 400 Bad Request\r\n\0";
+char *BAD_REQUEST_RESPONSE = "HTTP/1.1 400 Bad Request\r\n\0";
+char *NOT_FOUND = "HTTP/1.1 404 Not Found\r\n\0"; // If empty response from server after successful connect
 
 typedef struct stack {
   int fd;
@@ -399,6 +401,8 @@ int parseCacheHeaders(char * cacheHeaders, CacheInfo * cacheInfo) {
 
   cacheInfo->needsRevalidation = 0; // Set default value in case header doesnt exist
   cacheInfo->expiryTime = NULL;
+  // Set default value of eTag to NULL for checking later to avoid illegal access
+  cacheInfo->eTag = NULL;
   while ((cacheControlPolicy = strsep(&cacheHeaders, ",")) != NULL) {
     cacheControlPolicy += 1;
     if (*(cacheControlPolicy + (int)strlen(cacheControlPolicy) - 1) == '\r') {
@@ -555,7 +559,7 @@ int parseResponse(char * responseHeaders, int *isChunked, CacheInfo * cacheInfo,
   puts("Merging headers and body for forwarding");
   if (bodySizeLeft) *(toBeFreed + strlen(toBeFreed)) = '\n';
   if (!hasCacheControl) *canCache = 0;
-  return bodySizeLeft;
+  return bodySizeLeft > 0 ? bodySizeLeft : 0;
 }
 
 
@@ -678,7 +682,7 @@ int bufferedForward(int clientFd, int serverFd, char * serverBuff, char ** cache
     NODE * resultNode = get(URI);
     if (resultNode == NULL) { // GG
       printf("ERROR: Node unexpectedly missing for %s\n", URI);
-      return -1;
+      return REVALIDATION_INFO_MISSING;
     }
 
     // Retrieve ETag
@@ -686,7 +690,7 @@ int bufferedForward(int clientFd, int serverFd, char * serverBuff, char ** cache
     char * eTag = resultNode->info->eTag;
     if (eTag == NULL) { // Shouldnt happen, but if so treat as needing to revalidate
       printf("ERROR: eTag unexpectedly missing for %s\n", URI); // TEMP
-      return -1;
+      return REVALIDATION_INFO_MISSING;
     }
     printf("Retrieved eTag as %s\n", eTag);
 
@@ -694,7 +698,7 @@ int bufferedForward(int clientFd, int serverFd, char * serverBuff, char ** cache
     char * host = resultNode->host;
     if (host == NULL) { // Also shouldn't happen
       printf("ERROR: host unexpectedly missing for %s\n", host);
-      return -1;
+      return REVALIDATION_INFO_MISSING;
     }
     printf("Retrieved host as %s\n", host);
     char * revalidationTemplate = "GET %s HTTP/1.1\r\nIf-None-Match: %s\r\nHost: %s\r\n\r\n\0";
@@ -702,7 +706,7 @@ int bufferedForward(int clientFd, int serverFd, char * serverBuff, char ** cache
     memset(revalidationHeaders, '\0', RESPONSE_HEADER_SIZE);
     if (sprintf(revalidationHeaders, revalidationTemplate, URI, eTag, host) < 0) {
       puts("GG I fucked up");
-      return -1;
+      return REVALIDATION_INFO_MISSING;
     }
     int serverSock;
     if ((serverSock = connectToServer(reqInf)) < 0) {
@@ -858,6 +862,7 @@ int bufferedForward(int clientFd, int serverFd, char * serverBuff, char ** cache
     if ((forwardSock = connectToServer(reqInf)) < 0) {
       printf("Unable to connect to host %s\n", reqInf->host);
       exitRequest(connFd, reqInf, request);
+      return;
     }
     printf("Successfully connected to %s\n", reqInf->host);
     int writtenToClient = 0;
@@ -1012,6 +1017,15 @@ int bufferedForward(int clientFd, int serverFd, char * serverBuff, char ** cache
     int bodyLeft = parseResponse(responseHeaderBuf, &isChunked, cacheInfo, &serverAllowsCaching, reqInf, UID);
     printf("Successfully returned from parseResponse method with bodyLeft of %d\n", bodyLeft);
 
+    if (bodyLeft < 0) {
+      int errorWritten = (int)strlen(NOT_FOUND);
+      if (writeall(connFd, BAD_REQUEST_RESPONSE, &errorWritten) < 0) {
+	puts("Unable to return 404 to client");
+      }
+      else printf("Written %d bytes of 404 response to client\n", errorWritten);  
+      exitRequest(connFd, reqInf, request);
+      return;
+    }
     serverAllowsCaching ? puts("Server allows caching") : puts("Server forbids caching");
     // Write out buffer to client
     char * cacheBuff = (char *)malloc((RESPONSE_HEADER_SIZE + 1) * sizeof(char));
@@ -1275,9 +1289,22 @@ int bufferedForward(int clientFd, int serverFd, char * serverBuff, char ** cache
             exitRequest(connFd, parsedReq, toBeFreed);
           }
           else { // Need to revalidate - here, written to client and updates cache
-            revalidationResult > 0 ? puts("New data written to client and cache updated") : puts("Error revalidating result");
-            exitRequest(connFd, parsedReq, toBeFreed);
-          }
+            //revalidationResult > 0 ? puts("New data written to client and cache updated") : puts("Error revalidating result");
+	    if (revalidationResult > 0) {
+	      puts("New data written to client and cache updated");
+	      exitRequest(connFd, parsedReq, toBeFreed);
+	    }
+	    //exitRequest(connFd, parsedReq, toBeFreed);
+	    else if (revalidationResult == REVALIDATION_INFO_MISSING) { // Revalidation failed due to missing eTag... try forwarding request?
+	      puts("Detected revalidation failure due to missing request... forwarding request");
+	      forwardRequest(connFd, parsedReq, toBeFreed, UID); // will call exitRequest to close socket and free resources
+	      puts("Returned from forwarding request back to serviceRequest");
+	    }
+	    else {
+	      puts("Detected revalidation failure due to socket error... failing request");
+	      exitRequest(connFd, parsedReq, toBeFreed);
+	    }
+	  }
         }
         else {
           if (cacheRes == MISS){
@@ -1294,7 +1321,7 @@ int bufferedForward(int clientFd, int serverFd, char * serverBuff, char ** cache
           }
           printf("Request %s is not cacheable because %d\n", parsedReq->URI, cacheRes);
           forwardRequest(connFd, parsedReq, toBeFreed, UID); //Blocking : Opens socket and connection to origin server, writing from that socket to client socket
-          puts("Returned from forwarding request back ot serviceRequest");
+          puts("Returned from forwarding request back to serviceRequest");
         }
         printf("Done servicing request, freeing UID %s\n", UID);
         free(UID);
@@ -1360,10 +1387,12 @@ int bufferedForward(int clientFd, int serverFd, char * serverBuff, char ** cache
   int main(int argc, char **argv) {
     
     // Daemonize
+    /*
     if (daemon(0, 0) < 0) {
     puts("Unable to daemonize");
     exit(1);
     }
+    */
 
 
     int userID = getuid();

@@ -129,7 +129,7 @@ void putKey(int bucket, char * key, char * value, char * host, CacheInfo * cache
   }
   else {
     updateNode(targetNode, key, value, host, cacheInfo);
-    printf("Updated value as %s, cacheInfo ptr of %p for key %s in cache\n", value, cacheInfo, key);
+    printf("Updated value as %s, cacheInfo ptr of %p for key %s in cache\n", value, cacheInfo, cacheInfo->key);
   }
   pthread_mutex_unlock(&cacheLock);
 }
