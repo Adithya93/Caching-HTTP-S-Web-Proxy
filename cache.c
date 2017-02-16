@@ -62,13 +62,24 @@ NODE * makeNode(char * key, char * val, char * host, CacheInfo * cacheInfo) {
   return newNode;
 }
 
-//void updateNode(NODE * node, char * value, CacheInfo * cacheInfo) {
-void updateNode(NODE * node, char * value) {
+void updateNode(NODE * node, char * key, char * value, char * host, CacheInfo * cacheInfo) {
   printf("Updating cache node %p\n", node);
   free(node->val);
   node->val = value;
-  //free(node->info);
-  //node->info = cacheInfo;
+  if (node->info != cacheInfo) { //in the case of handling an expired cache entry, cacheInfo is more up-to-date than node->info, with correct expiry time, eTag, etc
+    printf("Detected change of cacheInfo in updateNode method, original cacheInfo ptr %p, new cacheInfo ptr %p\n", node->info, cacheInfo);
+    free(node->info);
+    node->info = cacheInfo;
+  }
+  if (node->key != key) {
+    printf("Freeing comparison key");
+    free(key);
+  }
+  if (node->host != host) {
+    printf("Freeing host ptr passed in to updateNode");
+    free(host);
+  }
+  puts("Done updating node");
 }
 
 NODE * getNode(int bucket, char * key) {
@@ -93,7 +104,6 @@ char * getValue(int bucket, char * key) {
   printf("Address of found node %p\n", foundNode);
   if ((void*)foundNode == NULL) {
     printf("ID %s not in cache\n", key);
-    //return NULL;
     result = NULL;
   }
   else {
@@ -114,8 +124,7 @@ void putKey(int bucket, char * key, char * value, char * host, CacheInfo * cache
     printf("Added new key %s to cache with value %s, cacheInfo ptr %p\n", key, value, cacheInfo);
   }
   else {
-    //updateNode(targetNode, value, cacheInfo);
-    updateNode(targetNode, value);
+    updateNode(targetNode, key, value, host, cacheInfo);
     printf("Updated value as %s, cacheInfo ptr of %p for key %s in cache\n", value, cacheInfo, key);
   }
   pthread_mutex_unlock(&cacheLock);
@@ -159,18 +168,3 @@ int initCache() {
   return pthread_mutex_init(&cacheLock, NULL);// || pthread_mutext_init(&bufferLock, NULL);
 }
 
-/*
-   int main() {
-   puts("Server starting.");
-   pthread_mutex_init(&cacheLock, NULL);
-   pthread_mutex_init(&bufferLock, NULL);
-   while (fgets(buffer, 256, stdin) != NULL) {
-   pthread_t childThread;
-   pthread_create(&childThread, NULL, serveRequest, NULL);
-// Call join with no hang (asynchronous wait) to log child's exit status
-}
-puts("Server exiting.");
-clearCache();
-exit(0);
-}
-*/

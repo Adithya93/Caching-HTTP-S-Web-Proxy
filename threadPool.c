@@ -35,8 +35,6 @@ const char *BAD_REQUEST_RESPONSE = "HTTP/1.1 400 Bad Request\r\n\0";
 
 typedef struct stack {
   int fd;
-  //struct sockaddr * sockPtr;
-  //socklen_t * addrLen;
   struct stack * next;
 } STACK;
 
@@ -101,7 +99,6 @@ int writeall(int fd, char *buf, int * len){
   return 0;
 }
 
-
 int transferChunks(int serverFd, int clientFd, char * buf, char ** cacheBuffPtr, int * canCache) {
   // handles transfer encoding=chunked as well as revalidation responses from a server (that are not 304 not modified).
   int testRead = 0;
@@ -120,11 +117,9 @@ int transferChunks(int serverFd, int clientFd, char * buf, char ** cacheBuffPtr,
   int grace = 10000;
   puts("About to start transferring chunks");
   while (grace > 0 && (testRead = recv(serverFd, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) != 0) {
-  //while (grace > 0 && (testRead = recv(serverFd, buf, BUFSIZE, MSG_PEEK | MSG_DONTWAIT)) != 0) { 
     if (testRead < 0) {
       usleep(200);
       grace --;
-      //perror("Error returned by testRead in transferChunks");
       continue;
     } 
     readNow = read(serverFd, buf, BUFSIZE);
@@ -133,7 +128,6 @@ int transferChunks(int serverFd, int clientFd, char * buf, char ** cacheBuffPtr,
       *canCache = 0;
       return -1;
     }
-    //puts("going into writeall");
     amountToWrite = readNow;
     writtenNow = writeall(clientFd, buf, &amountToWrite);
     if (writtenNow < 0) {
@@ -158,25 +152,20 @@ int transferChunks(int serverFd, int clientFd, char * buf, char ** cacheBuffPtr,
     }
     totalWritten += amountToWrite;
     amountToWrite = BUFSIZE;
-  // else {
-  // done = 1;
-  //}
+
     memset(buf, '\0', BUFSIZE);
   }
+
   printf("Value of grace left in transferChunks: %d\n", grace);
-  //puts("Socket closed by server");
   printf("Total bytes written to client: %d\n", totalWritten);
   memset(buf, '\0', BUFSIZE);
+
   if (!cacheFail) {
     *cacheBuffPtr = cacheBuff;
     *canCache = 1;
-    //return 0;
-    //return totalWritten;
   }
   else {
     *canCache = 0;
-    //puts("Write to client succeeded but caching failed as response buffer was too big");
-    //return -2;
   }
   printf("Final chunk written: %s\n", buf);
   return totalWritten;
@@ -187,8 +176,6 @@ void push(int fd) {
   pthread_mutex_lock(&stackMutex);
   STACK * newReq = (STACK*) malloc(sizeof(STACK));
   newReq->fd = fd;
-  //newReq->sockPtr = SA;
-  //newReq->addrLen = AL;
   newReq->next = requests;
   requests = newReq;
   pthread_cond_signal(&stackCond);
@@ -214,12 +201,9 @@ void incrExit(int reqsServiced) {
 
 // Check if in cache, not expired and doesn't need revalidation
 cacheResult cacheable(ReqInfo * reqInf, char ** cacheData) {
-  //char * result = get(reqInf->URI);
   NODE * result = get(reqInf->URI);
   if (result != NULL) {
-    //printf("About to store returned address %p into storing pointer %p\n", result, cacheData);
     printf("Retrieved node of address %p\n", result);
-    // Check revalidation and expiry
     struct tm * currentTime = getCurrentTime(); // MUST FREE after checking
     printf("Current time pointer : %p\n", currentTime);
     printf("Result's info pointer: %p\n", result->info);
@@ -254,7 +238,6 @@ void exitRequest(int connFd, ReqInfo * reqInf, char * request) {
   puts("In exitRequest method");
   long threadId = syscall(SYS_gettid);
   close(connFd);
-  //free(host);
   if (reqInf != NULL) {
     printf("Freeing host %s\n", reqInf->host);
     free(reqInf->host);
@@ -266,13 +249,6 @@ void exitRequest(int connFd, ReqInfo * reqInf, char * request) {
   }
   if (request != NULL) free(request);
   printf("%lu Freed request", threadId);
-  //if (servinfo != NULL) free(servinfo);
-  /*
-     if (servinfo != NULL) {
-     printf("%lu About to free %p\n",threadId, servinfo);
-     freeaddrinfo(servinfo);
-     }
-     */
   printf("%lu exitRequest method exiting successfully", threadId);
 }
 
@@ -330,12 +306,8 @@ ReqInfo * parseRequest(char * stringBuffer, char *UID) {
           printf("URI saved as %s\n", URI);
         }
         // Reconstruct line
-        /*printf("Reconstructing first line from %s\n", originalLine);*/
         if (line != NULL) *(originalLine + strlen(originalLine)) = ' ';
-        /*printf("First line is now %s\n", originalLine);*/
       }
-      /*puts("Reconstructed first line");*/
-      /*printf("%s\n", originalLine);*/
     }
     else { // Different logic for parsing remaining lines as format is Header: <Header Value>
       if (strncasecmp(line, "\r", 1) == 0) {
@@ -355,20 +327,12 @@ ReqInfo * parseRequest(char * stringBuffer, char *UID) {
         strncpy(host, hostName + 1, strlen(hostName + 1) + 1);
         printf("Host after strncpy: %s\n", host);
         printf("Length of host after strncpy: %d\n", (int)strlen(host));
-        //if ((int) host[strlen(hostName)-1] < PRINTABLE_ASCII){
 	printf("ASCII value of last character of host: %d", (127 & (int)host[strlen(host) - 1]));
 	if ((int)host[strlen(host) - 1] < PRINTABLE_ASCII) {
-	//this only happens in http case because in https case carriage return is with port
-          ///printf("Character currently at end of ");
-          //host[strlen(hostName)-1] = '\0';
 	  printf("Stripping last character : %c\n", host[strlen(host) - 1]);
 	  host[strlen(host) - 1] = '\0';
 	}
-
-	// This line caused invalid free
-        //host += 1;//remove space at front
         printf("[parseRequest()] Parsed final host name as %s\n", host);
-
         printf("[parseRequest()] Restoring host value header from %s\n", hostName);
         if (line != NULL) {
           printf("Is this port? %s\n", line);
@@ -433,11 +397,9 @@ int parseCacheHeaders(char * cacheHeaders, CacheInfo * cacheInfo) {
   int mustRevalidateLen = 15;
   int maxAgeLen = 8;
 
-  //int count = 0;
   cacheInfo->needsRevalidation = 0; // Set default value in case header doesnt exist
   cacheInfo->expiryTime = NULL;
   while ((cacheControlPolicy = strsep(&cacheHeaders, ",")) != NULL) {
-    //if (!count) cacheControlPolicy += 1;
     cacheControlPolicy += 1;
     if (*(cacheControlPolicy + (int)strlen(cacheControlPolicy) - 1) == '\r') {
       *(cacheControlPolicy + (int)strlen(cacheControlPolicy) - 1) = '\0';
@@ -467,14 +429,11 @@ int parseCacheHeaders(char * cacheHeaders, CacheInfo * cacheInfo) {
       printf("Detected end of cache control headers!");
       break;
     }
-    //count ++;
   }
-  // TEMP
   return 1;
 }
 
-
-// Returns pointer to start of body
+// Returns how many bytes of body are left to write, so that bufferedForward will know when to stop
 int parseResponse(char * responseHeaders, int *isChunked, CacheInfo * cacheInfo, int * canCache) {
   printf("About to parse response headers of stringBuffer %p\n", responseHeaders);
   printf("Length of request string: %d\n", (int)strlen(responseHeaders));
@@ -486,7 +445,6 @@ int parseResponse(char * responseHeaders, int *isChunked, CacheInfo * cacheInfo,
   printf("---:\n");
   printf("%s", responseHeaders);
   printf("---:\n");
-  //char * host, * line, * body, * headers;
   char contentLength[15] = "Content-Length\0";
   char cacheControl[14] = "Cache-Control\0";
   char transferEncoding[18] = "Transfer-Encoding\0";
@@ -509,7 +467,7 @@ int parseResponse(char * responseHeaders, int *isChunked, CacheInfo * cacheInfo,
       char * headerName = strsep(&line, ":");
       printf("[parseResponse()] Header: %s\n", headerName);
       printf("[parseResponse()] Header value: %s\n", line);
-      // TO-DO : Choose important headers, add parsing logic and pass them to forwardRequest method
+
       if (strcasecmp(headerName, contentLength) == 0) {
         puts("[parseResponse()] Detected content-length header");
         printf("String length from number onwards: %d\n",(int)strlen(line + 1));
@@ -531,25 +489,14 @@ int parseResponse(char * responseHeaders, int *isChunked, CacheInfo * cacheInfo,
         char *cacheControlPolicy;
 
         strncpy(copyOfLine, line, strlen(line) + 1);
-
-
-        /* Move to parseCacheControl method?
-           while ((cacheControlPolicy = strsep(&copyOfLine, ",")) != NULL){
-           printf("[parseResponse()] cache-control values include: %s \n", cacheControlPolicy);
-           }
-           */
-
         *canCache = parseCacheHeaders(copyOfLine, cacheInfo);
         if (!(*canCache)) {
-
           puts("Origin server forbids caching, setting cache flag to 0");
         }
         else {
           puts("Cache-control of origin server allows caching");
         }
 
-        //*(line + strlen(line) - 1) = '\0';
-        //*(line + strlen(line)) = '\r';
       } else if (strcasecmp(headerName, transferEncoding) == 0){
         puts("[parseResponse()] Detected transfer-encoding header");
         char *encoding = line + 1;
@@ -570,7 +517,6 @@ int parseResponse(char * responseHeaders, int *isChunked, CacheInfo * cacheInfo,
       printf("[parseResponse()] Reconstructed header: %s\n", headerName);
     }     printf("Reconstructing headers from %s\n", toBeFreed);
     *(toBeFreed + strlen(toBeFreed)) = '\n';
-    //printf("Reconstructed headers as %s\n", toBeFreed);
   }
   int bodySizeLeft;
   puts("Restoring new line for separation line");
@@ -580,7 +526,6 @@ int parseResponse(char * responseHeaders, int *isChunked, CacheInfo * cacheInfo,
     printf("String buffer pointer: %p\n", responseHeaders);
     printf("Length of string buffer: %d\n", (int)strlen(responseHeaders));
     body = responseHeaders;
-    //body = strsep(&responseHeaders, "\n"); // Now for body
     puts("Completed strsep");
     printf("Body pointer: %p\n", body);
     if (strlen(body) > 0) {
@@ -672,7 +617,6 @@ int connectToServer(ReqInfo * reqInf) {
   int reqType = reqInf -> reqType;
   int isHttps = reqInf -> isHttps;
   char * host = reqInf -> host;
-  //printf("Forwarding request from socket %d, reqType %d, isHttps %d, host %s\n", connFd, reqType, isHttps, host);
   int forwardSock = socket(AF_INET, SOCK_STREAM, 0);
   if (forwardSock < 0) {
     perror("ERROR opening forwarding socket");
@@ -719,7 +663,6 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
   //  GET /foo/bar/fun.html HTTP/1.1
   //  If-None-Match: "1aa008f-2d-50a3559482cc0"
   //  Host: www.origin.com
-
   // reqInf has host, URI and reqLine ptrs
   // Lookup URI in cache, retrieve node
   NODE * resultNode = get(URI);
@@ -745,9 +688,7 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
   }
   printf("Retrieved host as %s\n", host);
   char * revalidationTemplate = "GET %s HTTP/1.1\r\nIf-None-Match: %s\r\nHost: %s\r\n\r\n\0";
-  //char revalidationHeaders[BUFSIZE];
   char revalidationHeaders[RESPONSE_HEADER_SIZE];
-  //memset(revalidationHeaders, '\0', BUFSIZE);
   memset(revalidationHeaders, '\0', RESPONSE_HEADER_SIZE);
   if (sprintf(revalidationHeaders, revalidationTemplate, URI, eTag, host) < 0) {
     puts("GG I fucked up");
@@ -774,12 +715,10 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
 
   char canCache[26] = "HTTP/1.1 304 Not Modified\0";
 
-  int targetLen = strlen(canCache); // Only want to read this much and do strncasecmp before deciding what to do next
+  //int targetLen = strlen(canCache); // Only want to read this much and do strncasecmp before deciding what to do next
   
-  //memset(revalidationHeaders, '\0', BUFSIZE);
   memset(revalidationHeaders, '\0', RESPONSE_HEADER_SIZE);
-  //while (totalRead < BUFSIZE && (testRead = recv(serverSock, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) > 0) {
-  while (grace > 0 && (totalRead < targetLen) && (testRead = recv(serverSock, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) != 0) {
+  while (grace > 0 && (totalRead < RESPONSE_HEADER_SIZE - BUFSIZE) && (testRead = recv(serverSock, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) != 0) {
     if (testRead > 0) {
       readNow = read(serverSock, revalidationHeaders, BUFSIZE);
       if (readNow < 0) {
@@ -825,6 +764,20 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
     int transferResult;
     strcpy(cacheBuff, revalidationHeaders);
     memset(revalidationHeaders, '\0', RESPONSE_HEADER_SIZE);
+
+    // Parse out new eTag with case-insensitive search
+    char * eTagNeedle = "\r\neTag: ";
+    char * newETag = strcasestr(cacheBuff, eTagNeedle);
+    if (newETag == NULL) {
+      puts("Unable to locate new eTag");
+    }
+    else {
+      puts("Found new eTag in revalidation response header!");
+      newETag += strlen(eTagNeedle);
+      printf("New eTag: %s\n", newETag);
+    }
+
+    
     puts("About to call transferChunks from getRevalidation method to transfer remaining response");
     if ((transferResult = transferChunks(serverSock, clientFd, revalidationHeaders, &cacheBuff, &shouldCache)) < 0) {
       puts("Unable to transfer all data to client");
@@ -833,6 +786,18 @@ int getRevalidation(int clientFd, ReqInfo * reqInf, char * URI) {
     totalWritten += transferResult;
     // check if should cache, and do so
     if (shouldCache) {
+
+      struct tm* newTimeInfo = getCurrentTime();
+      free(resultNode->info->expiryTime);
+      resultNode->info->expiryTime = newTimeInfo;
+
+      if (newETag != NULL) {
+	char * cacheNewETag = (char *)malloc(strlen(newETag) + 1);
+	strncpy(cacheNewETag, newETag, strlen(newETag) + 1);
+	free(resultNode->info->eTag);
+	resultNode->info->eTag = cacheNewETag;
+	printf("Successfully allocated cache eTag ptr %p and string %s\n", resultNode->info->eTag, resultNode->info->eTag);
+      }
       puts("About to cache new data from server");
       printf("Saving cached data for URI %s of length %d\n", reqInf->URI, (int)strlen(cacheBuff));
       put(resultNode->key, cacheBuff, resultNode->host, resultNode->info); // Only cacheBuff new, and info ptr modified with its struct expiry * struct, rest same
@@ -929,7 +894,6 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
           exitRequest(connFd, reqInf, request);
           return;
         }
-        //printf("Wrote %d bytes to client\n", writtenToClient);
         totalWrittenToClient += writtenToClient;
       }
       memset(request, '\0', BUFSIZE);
@@ -960,12 +924,10 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
     return;
   }
   // Handle non-connect requests 
-  // First-pass : Try to write entire buffer in a single syscall
   int written;
   printf("Length of request: %d\n", (int)strlen(request));
   written = write(forwardSock, request, strlen(request));
   printf("Bytes written to origin server %s: %d\n", reqInf->host, written);
-  //bzero(responseHeaderBuf, RESPONSE_HEADER_SIZE);
   memset(responseHeaderBuf, '\0', RESPONSE_HEADER_SIZE);
   char *responseHeaderPtr = responseHeaderBuf;
   int readFromOrigin = 0;
@@ -975,10 +937,8 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
   int testRead;
   int done = 0;
   int grace = 10000;
-  //while ((totalReadFromOrigin < RESPONSE_HEADER_SIZE) && ((testRead = recv(forwardSock, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) > 0)) {
   while ((grace > 0) && (totalReadFromOrigin < RESPONSE_HEADER_SIZE - BUFSIZE) && (testRead = recv(forwardSock, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) != 0) {
     if (testRead > 0) {
-      //if ((readFromOrigin = read(forwardSock, responseHeaderPtr, RESPONSE_HEADER_SIZE)) < 0) {
       if ((readFromOrigin = read(forwardSock, responseHeaderPtr, BUFSIZE)) < 0) {
         perror("Unable to read from origin server");
         exitRequest(connFd, reqInf, request);
@@ -988,7 +948,6 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
       responseHeaderPtr += readFromOrigin;
     }
     else if (testRead < 0) {
-      //perror("Test read on server in forwardrequest returns error");
       grace --;
       usleep(20);
     }
@@ -1018,15 +977,8 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
   memset(cacheBuff, '\0', RESPONSE_HEADER_SIZE);
   char * cacheKey = (char *)malloc((strlen(reqInf->URI) + 1) * sizeof(char));
   char * cacheHost = (char *)malloc((strlen(reqInf->host) + 1) * sizeof(char));
-  /* SHOULD USE WRITEALL INSTEAD
-  if ((writtenToClient = write(connFd, responseHeaderBuf, readFromOrigin)) < 0) {
-    perror("Unable to do initial forwarding to client");
-    exitRequest(connFd, reqInf, request);
-    return;
-  }
-  */
-  //int initialWritten = readFromOrigin;
   writtenToClient = totalReadFromOrigin;
+
   if (writeall(connFd, responseHeaderBuf, &writtenToClient) < 0) {
     puts("Error forwarding initial bytes to client after parsing response");
     exitRequest(connFd, reqInf, request);
@@ -1035,7 +987,9 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
     free(cacheBuff);
     return;
   }
+
   printf("Wrote %d of the initial bytes to client\n", writtenToClient);
+
   if (serverAllowsCaching) {
     strncpy(cacheBuff, responseHeaderBuf, writtenToClient);
     //cacheInfo->key = (char *)malloc((strlen(reqInf->URI) + 1) * sizeof(char));
@@ -1047,26 +1001,20 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
   }
 
   totalWrittenToClient += writtenToClient;
-  //int canCache = 0;
   int canCache = serverAllowsCaching;
   if (bodyLeft > 0 && isChunked == 0) {
     printf("About to do buffered forwarding for %d\n bytes", bodyLeft);
     memset(request, '\0', BUFSIZE);
     memset(responseHeaderBuf, '\0', RESPONSE_HEADER_SIZE);
-    //int canCache = 0;
     totalWrittenToClient += bufferedForward(connFd, forwardSock, responseHeaderBuf, &cacheBuff, bodyLeft, &canCache);
     if (!canCache) {
       serverAllowsCaching ? puts("Unable to cache as response was too big") : puts("Unable to cache as server forbids it");
-      //puts("Freeing cache buffer");
       char *logString = malloc(120*sizeof(char));
       memset(logString, '\0', 120*sizeof(char));
       if (serverAllowsCaching) sprintf(logString, "%s: not cacheable because response is too big.", UID);
       else if (!serverAllowsCaching) sprintf(logString, "%s: not cacheable because server forbids it.", UID);
       logpush(logString);
       free(logString);
-
-      //free(cacheBuff);
-      //cacheBuff = NULL;
     }
   }
   else {
@@ -1074,49 +1022,16 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
       memset(request, '\0', BUFSIZE);
       int rc = transferChunks(forwardSock, connFd, request, &cacheBuff, &canCache);
       if (rc < 0) {
-        //rc == -1 ? puts("fatal error in transferChunks, write to client failed") : puts("write to client succeeded but caching failed");
         // Dont save to cache if failed
         puts("Writing to client failed, not caching");//, freeing cacheBuff");
-        //free(cacheBuff);
-        //cacheBuff = NULL;
       }
-      /*
-      else if (!canCache) {
-	//if (serverAllowsCaching) {
-	//  puts("Writing to client succeeded but caching failed as response was too big");
-	//  free(cacheBuff);
-	//  cacheBuff = NULL;
-	//}
-        //serverAllowsCaching ? puts("Writing to client succeeded but caching failed as response was too big") : puts("Writing to client succeeded but not caching as server forbids it");
-	//else puts("Writing to client succeeded but not caching as server forbids it");
-        totalWrittenToClient += rc;
-        //puts("Freeing cache buffer");
-        //if (serverAllowsCaching) free(cacheBuff);
-        //cacheBuff = NULL;
-      }
-      */
       else {
-        //puts("Both writing of chunks to client and caching succeeded");
         totalWrittenToClient += rc;
       }
-      //exitRequest(connFd, reqInf, request, servinfo);
-      //return;
     }
-    /*
-    else {
-      if (!serverAllowsCaching) {
-        puts("Freeing cache buffer");
-        free(cacheBuff);
-        cacheBuff = NULL;
-      }
-      puts("Completed forwarding in single write, no need for buffering");
-    }
-    */
   }
-  //printf("Finished servicing request with total of %d bytes written\n", totalWrittenToClient);
+
   printf("Finished servicing request to URI %s with a total of %d bytes written\n", reqInf->URI, totalWrittenToClient);
-  // CANNOT FREE HERE, WILL SCREW UP CACHING
-  //exitRequest(connFd, reqInf, request);
 
   if (!canCache) {
     printf("Not caching data for URI %s\n", reqInf->URI);
@@ -1127,20 +1042,11 @@ void forwardRequest(int connFd, ReqInfo * reqInf, char * request, char* UID) {
     free(cacheHost);
     puts("Freed cacheKey, cacheHost, cacheBuffer and cacheInfo");
   }
-  //if (cacheBuff != NULL) {
   else {
     printf("Saving cached data for URI %s of length %d\n", reqInf->URI, (int)strlen(cacheBuff));
     put(cacheKey, cacheBuff, cacheHost, cacheInfo); // TEMP : Extract expiry and revalidation info from response
   }
-  /*
-  else {
-    printf("Not caching data for URI %s\n", reqInf->URI);
-    free(cacheInfo);
-  }
-  */
   puts("About to return from forwardRequest method");
-
-  // Can only exitRequest after caching if necessary
   exitRequest(connFd, reqInf, request);
   return;
 }
@@ -1206,15 +1112,11 @@ void * serviceRequest() {
         }
         exitRequest(connFd, parsedReq, toBeFreed);
       } else if ((cacheRes = cacheable(parsedReq, &cachedData)) == HIT) { 
-        /*printf("Request %s is cacheable!\n", parsedReq->URI);*/
-
         char *log = malloc(50*sizeof(char));
         sprintf(log, "%s: in cache, valid", UID);
         logpush(log);
         free(log);
-
         int cachedWrittenToClient = (int)strlen(cachedData);
-        //if (writeall(connFd, cachedData, strlen(cachedData))) {
         if (writeall(connFd, cachedData, &cachedWrittenToClient)) {
           puts("Unable to write all cached data to client");
         }
@@ -1235,7 +1137,6 @@ void * serviceRequest() {
           puts("Origin server says no revalidation needed!");
           // retrieve from Cache
           int cachedWrittenToClient = (int)strlen(cachedData);
-          //if (writeall(connFd, cachedData, strlen(cachedData))) {
           if (writeall(connFd, cachedData, &cachedWrittenToClient)) {
             puts("Unable to write all cached data to client");
           }
@@ -1253,14 +1154,10 @@ void * serviceRequest() {
 	  
           char *log = malloc(50*sizeof(char));
 	  char * logFormatStr = "%s: not in cache\0";
-	  //int logFormatStrLen = strlen(logFormatStr);
-	  //int logStrLen = logFormatStrLen - 2 + strlen(UID);
-	  //char log[logStrLen];
 	  if (cacheRes == MISS) sprintf(log, logFormatStr, UID);
           else if (cacheRes == EXPIRED) sprintf(log, logFormatStr, UID);
           logpush(log);
           free(log);
-
           printf("Request %s is not cacheable because %d\n", parsedReq->URI, cacheRes);
           forwardRequest(connFd, parsedReq, toBeFreed, UID); //Blocking : Opens socket and connection to origin server, writing from that socket to client socket
 	  puts("Returned from forwarding request back ot serviceRequest");
@@ -1327,40 +1224,11 @@ void * serviceRequest() {
 
     int main(int argc, char **argv) {
       // Daemonize
-
-      
       if (daemon(0, 0) < 0) {
 	puts("Unable to daemonize");
 	exit(1);
       }
-      
 
-      /*pid_t pid;*/
-      /*pid = fork();*/
-      /*if (pid <0)  */
-      /*exit(EXIT_FAILURE);  */
-      /*else if (pid > 0)  */
-      /*exit(EXIT_SUCCESS); */
-      /*if (setsid() == -1)*/
-      /*exit(EXIT_FAILURE);  */
-      /*signal(SIGCHLD, SIG_IGN);*/
-      /*signal(SIGHUP, SIG_IGN);*/
-      /*pid = fork();*/
-      /*if (pid <0)  */
-      /*exit(EXIT_FAILURE);  */
-      /*else if (pid > 0)  */
-      /*exit(EXIT_SUCCESS); */
-      /*umask(0); */
-      /*if (chdir("/") == -1)*/
-      /*exit(EXIT_FAILURE);  */
-      /*for (int i = sysconf(_SC_OPEN_MAX); i >=0 ; i--)*/
-      /*close(i);*/
-      /*open("/dev/null", O_RDWR); */
-      /*dup(0);*/
-      /*dup(0);*/
-      /*openlog("httpservermod", LOG_PID, LOG_USER);*/
-      /*syslog(LOG_INFO, "start logging");*/
-      // Now a daemon!
       int userID = getuid();
       printf("User ID: %d\n", userID);
       int effectiveID = geteuid();
@@ -1372,17 +1240,12 @@ void * serviceRequest() {
       logpush("logger started..");
       printf("Main thread of id %ld about to spawn pool threads\n", syscall(SYS_gettid));
       signal(SIGINT, quit);
-      //signal(SIGPIPE, socketCloseAlert);
       puts("Registered keyboard-interrupt signal-handler");
       initCache();
       puts("Initialized cache");
       spawnThreads();
       struct sockaddr_in serveraddr, cliaddr;
-      //char *hostname;
-      //char buf[BUFSIZE];
-
       socklen_t socklen;
-
       portno = PORTNAME;
       /* socket: create the socket */
       listenfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -1410,11 +1273,9 @@ void * serviceRequest() {
           error("Unable to accept connection");
         }
         printf("Accepted new connection on socket %d\n", connfd);
-        //push(connfd, &cliaddr, &len);
 	push(connfd);
 	printf("Pushed connection %d onto stack\n", connfd);
       }
-
       close(listenfd);
       return 0;
     }
