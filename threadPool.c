@@ -18,7 +18,7 @@
 #include "./logging.c"
 
 #define BUFSIZE 1024
-#define PORTNAME 80
+#define PORTNAME 443
 #define POOLSIZE 10
 #define RESPONSE_HEADER_SIZE 8192
 #define HTTP_PORT 80
@@ -1160,7 +1160,7 @@ int bufferedForward(int clientFd, int serverFd, char * serverBuff, char ** cache
         while (grace > 0 && ((testRead = recv(connFd, testBuf, 1, MSG_PEEK | MSG_DONTWAIT)) != 0)) {
           if (testRead < 0) {
             grace --;
-            usleep(20000);
+            usleep(2000);
             continue;
           }
           rc = read(connFd,stringBuffer + totalRead,BUFSIZE);
