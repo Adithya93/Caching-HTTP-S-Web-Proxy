@@ -18,7 +18,7 @@
 #include "./logging.c"
 
 #define BUFSIZE 1024
-#define PORTNAME 443
+#define PORTNAME 80
 #define POOLSIZE 10
 #define RESPONSE_HEADER_SIZE 8192
 #define HTTP_PORT 80
